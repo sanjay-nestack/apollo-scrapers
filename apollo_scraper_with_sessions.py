@@ -30,6 +30,8 @@ from apollo.parsing import (convert_count, convert_date, get_past_renewal_credit
 from apollo.browser import (cleanup_chrome_processes, remove_chrome_lock_files,
     cleanup_apollo_chrome, start_driver, safe_quit, detect_force_logout,
     detect_cloudflare_challenge, clear_cloudflare_challenge)
+from apollo.auth import login_if_needed, HARDCODED_SKIP_EMAILS
+from apollo.persistence import safe_save_csv
 for h in logging.root.handlers[:]:
     logging.root.removeHandler(h)
 # Configure logging
@@ -124,54 +126,6 @@ def navigate_saved_searches2():
     driver.get("https://app.apollo.io/#/people")
     time.sleep(5)
 
-def safe_save_csv(df, file_path, max_retries=3):
-    """Safely save DataFrame to CSV with retry logic and backup handling."""
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    
-    for attempt in range(max_retries):
-        try:
-            # Try to save directly
-            df.to_csv(file_path, index=False)
-            print(f"[FILE SAVE] Successfully saved to {file_path}")
-            return True
-        except PermissionError:
-            print(f"[FILE SAVE] Permission denied (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                # Try to create a backup and save to temp file
-                try:
-                    backup_path = file_path.replace('.csv', f'_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
-                    if os.path.exists(file_path):
-                        shutil.copy2(file_path, backup_path)
-                        print(f"[FILE SAVE] Created backup: {backup_path}")
-                    
-                    # Try to save to a temp file first
-                    temp_path = file_path.replace('.csv', '_temp.csv')
-                    df.to_csv(temp_path, index=False)
-                    
-                    # Then move it to the final location
-                    shutil.move(temp_path, file_path)
-                    print(f"[FILE SAVE] Successfully saved via temp file to {file_path}")
-                    return True
-                except Exception as e:
-                    print(f"[FILE SAVE] Temp file method failed: {e}")
-                    time.sleep(2)  # Wait before retry
-            else:
-                print(f"[FILE SAVE] All attempts failed. Saving to alternative location...")
-                # Save to alternative location
-                alt_path = file_path.replace('.csv', f'_alternative_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
-                df.to_csv(alt_path, index=False)
-                print(f"[FILE SAVE] Saved to alternative location: {alt_path}")
-                return True
-        except Exception as e:
-            print(f"[FILE SAVE] Unexpected error: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2)
-            else:
-                print(f"[FILE SAVE] Failed to save after {max_retries} attempts")
-                return False
-    return False
-
 # ---------------------------------------------------------------------------
 # Apollo credit-page layout handling
 #
@@ -194,51 +148,6 @@ def safe_save_csv(df, file_path, max_retries=3):
 # separator ("3,989 of 4,000credits used"), so pass the BODY text here.
 # ---------------------------------------------------------------------------
 
-
-def login_if_needed(driver, email, password):
-    wait = WebDriverWait(driver, 20)
-
-    driver.get("https://app.apollo.io")
-
-    time.sleep(5)
-
-    # Already logged in
-    if "login" not in driver.current_url.lower():
-        print(f"[{email}] Already logged in")
-        return
-
-    print(f"[{email}] Logging in via Google")
-
-    wait.until(
-        EC.element_to_be_clickable(
-            (By.XPATH, "//button[contains(., 'Log In with Google')]")
-        )
-    ).click()
-
-    # Google email
-    email_input = wait.until(
-        EC.element_to_be_clickable((By.ID, "identifierId"))
-    )
-    email_input.clear()
-    email_input.send_keys(email)
-    email_input.send_keys(Keys.ENTER)
-
-    time.sleep(15)
-
-    # Google password
-    password_input = wait.until(
-        EC.element_to_be_clickable((By.NAME, "Passwd"))
-    )
-    password_input.clear()
-    password_input.send_keys(password)
-    password_input.send_keys(Keys.ENTER)
-
-    # Give time for redirects / MFA
-    time.sleep(15)
-    print('\n\n')
-    input("press enter to continue")
-
-    print(f"[{email}] Login complete")
 
 # https://docs.google.com/spreadsheets/d/1kKqEfKLSW9cUtcjmNlinxeYXt-EtcXm5B5c4m7_CnbI/edit?pli=1&gid=0#gid=0
 # sheet_url = "https://docs.google.com/spreadsheets/d/1kKqEfKLSW9cUtcjmNlinxeYXt-EtcXm5B5c4m7_CnbI/export?format=csv&gid=0"
