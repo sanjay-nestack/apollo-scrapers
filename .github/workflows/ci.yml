@@ -1,0 +1,54 @@
+name: CI
+
+# Runs on every push to dev and on every PR targeting main.
+on:
+  push:
+    branches: [ dev ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for secret scan)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # --- Syntax gate: every .py must compile (archive/ included; venv is git-ignored) ---
+      - name: Compile all Python
+        run: python -m compileall -q .
+
+      # --- Dependencies must resolve on a clean machine ---
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # --- Lint (advisory for now: legacy code + `from config import *` produce noise).
+      #     Reports issues on the active code without failing the build. Tighten later. ---
+      - name: Ruff lint (advisory)
+        continue-on-error: true
+        run: |
+          pip install ruff
+          ruff check --exclude archive .
+
+      # --- Secret scan: hard gate. Blocks any credential from entering the repo/history. ---
+      - name: Secret scan (gitleaks)
+        run: |
+          url=$(curl -sSfL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+                | grep -o 'https://[^"]*linux_x64.tar.gz' | head -1)
+          echo "gitleaks: $url"
+          curl -sSfL "$url" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks detect --no-banner --redact --source . --exit-code 1
