@@ -67,6 +67,14 @@ except NameError:
 access_key = AWS_ACCESS_KEY
 secret_key = AWS_SECRET_KEY
 
+# Optional MySQL dual-write. Import and every write are guarded so a DB problem
+# can never stop a scraping run; the CSV writes remain the source of truth.
+try:
+    import db as _db
+except Exception as _db_err:  # noqa: BLE001
+    _db = None
+    print(f"⚠️  DB module unavailable, DB writes disabled: {_db_err}")
+
 # File paths (automatically generated from BASE_FOLDER_PATH)
 APOLLO_SEARCH_DATA_CSV = os.path.join(BASE_FOLDER_PATH, 'apollo_search_data.csv')
 APOLLO_CREDITS_DATA_CSV = os.path.join(BASE_FOLDER_PATH, 'apollo_credits_only.csv')
@@ -1405,6 +1413,8 @@ for index, row in final_df_sorted.iterrows():
             # First time creating the file
             df = new_entry
         safe_save_csv(df, csv_path)
+        if _db:
+            _db.save_row_safe('apollo_search_data', apollo_search_field)
 
     email_credits = []
     provided_monthly_credits = []
@@ -1587,6 +1597,8 @@ for index, row in final_df_sorted.iterrows():
             # First time creating the file
             df_credits = new_entry_credits
         safe_save_csv(df_credits, csv_path_credits)
+        if _db:
+            _db.save_row_safe('apollo_credits_data', apollo_credits_field)
         time.sleep(random.uniform(20, 30))
         
     if not condition3:
@@ -1970,6 +1982,8 @@ for index, row in final_df_sorted.iterrows():
             print(f"[CSV SAVE] Creating new CSV file")
             
         safe_save_csv(temp_upload_df, csv_path)
+        if _db:
+            _db.save_row_safe('apollo_upload_data', final_filed)
         print(f"[CSV SAVE] Successfully saved to {csv_path}")
         time.sleep(random.uniform(20, 30))
 
