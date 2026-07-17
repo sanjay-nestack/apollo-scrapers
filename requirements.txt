@@ -1,0 +1,8 @@
+selenium
+webdriver-manager
+pandas
+boto3==1.39.6
+beautifulsoup4
+python-dateutil
+python-dotenv
+mysql-connector-python

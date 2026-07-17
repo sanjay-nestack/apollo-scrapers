@@ -1,0 +1,40 @@
+# ===================== Secrets (NEVER commit) =====================
+.env
+.env.*
+!.env.example
+# account emails AND passwords
+ApolloUsers.csv
+# live Apollo session cookies
+cookies.json
+
+# ===================== Virtual environment =======================
+crawler/
+venv/
+.venv/
+env/
+
+# ===================== Python ====================================
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# ===================== Data (managed in DB / S3, not git) ========
+*.csv
+*.xlsx
+*.xls
+
+# ===================== Logs ======================================
+*.log
+logs/
+
+# ===================== Scratch / debug artifacts =================
+captcha.html
+*.ipynb
+
+# ===================== OS / editor ===============================
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
