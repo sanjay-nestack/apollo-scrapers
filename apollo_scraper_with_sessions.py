@@ -648,1383 +648,1387 @@ def login_if_needed(driver, email, password):
 # https://docs.google.com/spreadsheets/d/1kKqEfKLSW9cUtcjmNlinxeYXt-EtcXm5B5c4m7_CnbI/edit?pli=1&gid=0#gid=0
 # sheet_url = "https://docs.google.com/spreadsheets/d/1kKqEfKLSW9cUtcjmNlinxeYXt-EtcXm5B5c4m7_CnbI/export?format=csv&gid=0"
 # df = pd.read_csv(sheet_url)
-df = pd.read_csv(os.path.join(BASE_FOLDER_PATH, 'ApolloUsers.csv'))
-df = df.iloc[::-1]
+def main():
+    df = pd.read_csv(os.path.join(BASE_FOLDER_PATH, 'ApolloUsers.csv'))
+    df = df.iloc[::-1]
 
 
-columns_apollo_search = [
-    'email',
-    'status',
-    'last_execution',
-    'used_credits',
-    'total_credits',
-    'renews_on',
-    'saved_titles',
-    'saved_counts',
-    'total_saved',
-    'netnew_counts',
-    'total_netnew',
-    # The search block writes failed_reason on error, so this column exists in the
-    # CSV. It MUST be listed here: read_csv(names=..., header=None) with fewer names
-    # than columns silently promotes the first column to the index, which made
-    # apollo_search_data['email'] return status values - so the email was never found
-    # and condition1 was always False for every account.
-    'failed_reason'
-    ]
-if os.path.exists(APOLLO_SEARCH_DATA_CSV):
-    apollo_search_data = pd.read_csv(
-        APOLLO_SEARCH_DATA_CSV,
-        names=columns_apollo_search,
-        header=None,  # tells pandas the file has no header row
-    )
-else:
-    apollo_search_data = pd.DataFrame(columns=columns_apollo_search)
-
-columns_apollo_credits = [
-    'email',
-    'status',
-    'last_execution',
-    'renewal_date',
-    'first_month_credits',
-    'second_month_credits',
-    'third_month_credits',
-    'fourth_month_credits',
-    'fifth_month_credits',
-    'sixth_month_credits',
-    'first_month_provided',
-    'second_month_provided',
-    'third_month_provided',
-    'fourth_month_provided',
-    'fifth_month_provided',
-    'sixth_month_provided'
-    ]
-if os.path.exists(APOLLO_CREDITS_DATA_CSV):
-    apollo_credits_data = pd.read_csv(
-        APOLLO_CREDITS_DATA_CSV,
-        names=columns_apollo_credits,
-        header=None,  # tells pandas the file has no header row
-    )
-else:
-    apollo_credits_data = pd.DataFrame(columns=columns_apollo_credits)
-
-columns_apollo_upload = [
-    'email',
-    'data_count',
-    'last_uploaded',
-    'status',
-    'last_execution',
-    'monthly_breakdown'
-]
-if os.path.exists(APOLLO_UPLOAD_DATA_CSV):
-    apollo_upload_data = pd.read_csv(
-        APOLLO_UPLOAD_DATA_CSV,
-        names=columns_apollo_upload,
-        header=None,  # tells pandas the file has no header row
-    )
-else:
-    apollo_upload_data = pd.DataFrame(columns=columns_apollo_upload)
-
-apollo_upload_details = []
-apollo_credits_data['renewal_date'] = pd.to_datetime(apollo_credits_data['renewal_date'], errors='coerce', format='%Y-%m-%d %H:%M:%S')
-final_df = pd.merge(df, apollo_credits_data, left_on='Email', right_on='email', how='left')
-
-final_df_sorted = final_df.sort_values(by='renewal_date', ascending=True)
-# input("press input to continue")
-
-# ONE-TIME STARTUP CLEANUP:
-# On this machine, launching the scraper's Chrome while ANY Chrome is already
-# running makes the new process hand off to the existing browser session and exit
-# ("session not created: Chrome failed to start: crashed"). So close ALL Chrome
-# (including the personal browser) once, up front, for reliable launches.
-# IMPORTANT: do NOT open Chrome again while the run is in progress.
-print("=" * 60)
-print("[STARTUP] Closing ALL Chrome windows so the scraper can launch cleanly.")
-print("[STARTUP] This also closes your personal Chrome. Do NOT reopen Chrome during the run.")
-print("=" * 60)
-logging.info("[STARTUP] Closing all Chrome before run (auto-close-all mode)")
-cleanup_chrome_processes()
-
-email_number = 1
-for index, row in final_df_sorted.iterrows():
-    email = row["Email"]
-    password = row["2026 june Password"]
-    logging.info(f'Index: {email_number} - Running for {email}')
-    email_number += 1
-
-    # if TARGET_EMAIL and email.lower().strip() not in [s_email.lower().strip() for s_email in TARGET_EMAIL]:
-    #     print(f"Skipping {email} as it is not {TARGET_EMAIL}")
-    #     continue
-    # if (row['renewal_date'] is not None) and (row['renewal_date'] > (datetime.now() + timedelta(days=10))):
-    #     print(f"{email} - Renewal date is more than 10 days from now. Skipping.")
-    #     continue
-    if email.lower().strip() in ['vijay.raghavan@nestack.co.in', 'rahul@nestack.in', 'vijay@nestack.in']:
-        continue
-
-
-    # If apollo_search_data is not empty and email exists
-    hours_to_check = 22
-    condition1 = False
-    print(f'[CONDITION CHECK] Checking condition1 for {email}...')
-    print(f'[CONDITION CHECK] apollo_search_data empty: {apollo_search_data.empty}')
-    if not apollo_search_data.empty:
-        print(f'[CONDITION CHECK] Email in apollo_search_data: {email in apollo_search_data["email"].values}')
-    if not apollo_search_data.empty and email in apollo_search_data['email'].values:
-        existing_row = apollo_search_data[apollo_search_data['email'] == email].iloc[0]
-        print(f'[CONDITION CHECK] Found existing row - status: {existing_row["status"]}, last_execution: {existing_row["last_execution"]}')
-        
-        # Check if data is actually valid (not empty/failed)
-        saved_titles = existing_row.get('saved_titles', '')
-        saved_counts = existing_row.get('saved_counts', '')
-        total_saved = existing_row.get('total_saved', 0)
-        
-        # Check if saved_titles is empty or just contains empty strings
-        has_valid_titles = False
-        if saved_titles and str(saved_titles).strip() and str(saved_titles) not in ['', 'nan', 'None']:
-            # Check if it's not just an empty tuple representation
-            if not (str(saved_titles).strip().startswith("('')") or str(saved_titles).strip() == "('',)"):
-                has_valid_titles = True
-        
-        # Check if total_saved is meaningful (greater than 0)
-        has_valid_data = False
-        try:
-            total_saved_val = float(total_saved) if total_saved else 0
-            if total_saved_val > 0:
-                has_valid_data = True
-        except:
-            pass
-        
-        print(f'[CONDITION CHECK] Data validation - saved_titles: "{saved_titles}", total_saved: {total_saved}')
-        print(f'[CONDITION CHECK] Has valid titles: {has_valid_titles}, Has valid data (total_saved > 0): {has_valid_data}')
-        
-        time_diff = datetime.now() - pd.to_datetime(existing_row['last_execution'])
-        print(f'[CONDITION CHECK] Time since last execution: {time_diff.total_seconds() / 3600:.2f} hours (threshold: {hours_to_check} hours)')
-        
-        # Only skip if: status is completed AND within time threshold AND has valid data
-        if (existing_row['status'] == 'completed') and (pd.to_datetime(existing_row['last_execution']) > (datetime.now() - timedelta(hours=hours_to_check))):
-            if has_valid_titles or has_valid_data:
-                logging.info(f'Last execution was on {existing_row['last_execution']} for email {email} and current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')
-                logging.info(f"Skipping {email} as it already exists in apollo_search_data with 'completed' status and valid data")
-                print(f'[CONDITION CHECK] Last execution was on {existing_row['last_execution']} for email {email} and current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')
-                print(f'[CONDITION CHECK] Skipping {email} - status is "completed" with valid data')
-                condition1 = True
-            else:
-                print(f'[CONDITION CHECK] ⚠️  Status is "completed" but data is empty/invalid - will reprocess')
-                print(f'[CONDITION CHECK] Previous run appears to have failed despite "completed" status')
-                condition1 = False
-        else:
-            print(f'[CONDITION CHECK] Not skipping - status: {existing_row["status"]} or time check failed')
-    else:
-        print(f'[CONDITION CHECK] Email not found in apollo_search_data or data is empty, condition1 remains False')
-
-    condition2 = False
-    if not apollo_credits_data.empty and email in apollo_credits_data['email'].values:
-        existing_row = apollo_credits_data[apollo_credits_data['email'] == email].iloc[0]
-        
-        # Check if credits data is actually valid
-        first_month_credits = existing_row.get('first_month_credits', 0)
-        renewal_date = existing_row.get('renewal_date', '')
-        
-        has_valid_credits = False
-        try:
-            # Don't test `if first_month_credits` - 0.0 is falsy but is a real value
-            # (a fresh account genuinely can have 0 credits used), which would make a
-            # legitimate zero row look invalid and reprocess on every run.
-            if pd.notna(first_month_credits) and str(first_month_credits) not in ['', 'nan', 'None', '-1']:
-                first_month_val = float(first_month_credits)
-                if first_month_val >= 0:  # Valid if >= 0 (0 is also valid)
-                    has_valid_credits = True
-        except:
-            pass
-        
-        has_valid_renewal = renewal_date and str(renewal_date) not in ['', 'nan', 'None']
-        
-        print(f'[CONDITION CHECK] Credits data validation - first_month_credits: {first_month_credits}, renewal_date: {renewal_date}')
-        print(f'[CONDITION CHECK] Has valid credits: {has_valid_credits}, Has valid renewal: {has_valid_renewal}')
-        
-        if (existing_row['status'] == 'completed') and (pd.to_datetime(existing_row['last_execution']) > (datetime.now() - timedelta(hours=hours_to_check))):
-            # BOTH must be present. With `or`, a row that had a renewal_date but no
-            # month values at all counted as "valid" and was skipped, so the empty
-            # data stuck for hours_to_check and the 'will reprocess' branch below
-            # could never fire for the exact rows it was written to catch.
-            if has_valid_credits and has_valid_renewal:
-                print(f"[CONDITION CHECK] Skipping {email} as it already exists in apollo_credits_data with 'completed' status and valid data")
-                logging.info(f"Skipping {email} as it already exists in apollo_credits_data with 'completed' status")
-                condition2 = True
-            else:
-                print(f'[CONDITION CHECK] ⚠️  Credits status is "completed" but data is invalid - will reprocess')
-                condition2 = False
-        else:
-            condition2 = False
-
-    condition3 = False
-    if not apollo_upload_data.empty and email in apollo_upload_data['email'].values:
-        existing_row = apollo_upload_data[apollo_upload_data['email'] == email].iloc[0]
-        
-        # Check if upload data is actually valid
-        data_count = existing_row.get('data_count', 0)
-        monthly_breakdown = existing_row.get('monthly_breakdown', '')
-        
-        has_valid_count = False
-        try:
-            if data_count and str(data_count) not in ['', 'nan', 'None']:
-                count_val = float(data_count)
-                if count_val > 0:
-                    has_valid_count = True
-        except:
-            pass
-        
-        has_valid_breakdown = monthly_breakdown and str(monthly_breakdown) not in ['', 'nan', 'None', '[]']
-        
-        print(f'[CONDITION CHECK] Upload data validation - data_count: {data_count}, monthly_breakdown: {str(monthly_breakdown)[:50]}...')
-        print(f'[CONDITION CHECK] Has valid count: {has_valid_count}, Has valid breakdown: {has_valid_breakdown}')
-        
-        if (existing_row['status'] == 'completed') and (pd.to_datetime(existing_row['last_execution']) > (datetime.now() - timedelta(hours=hours_to_check))):
-            if has_valid_count or has_valid_breakdown:
-                print(f"[CONDITION CHECK] Skipping {email} as it already exists in apollo_upload_data with 'completed' status and valid data")
-                logging.info(f"Skipping {email} as it already exists in apollo_upload_data with 'completed' status")
-                condition3 = True
-            else:
-                print(f'[CONDITION CHECK] ⚠️  Upload status is "completed" but data is invalid - will reprocess')
-                condition3 = False
-        else:
-            condition3 = False
-
-
-    condition4 = True
-
-    rd = row.get('renewal_date')
-    fm = row.get('first_month_credits')
-
-    # Parse first_month robustly
-    def to_int(x, default=0):
-        try:
-            return int(x)
-        except (TypeError, ValueError):
-            return default
-
-    first_month_count = to_int(fm, 0)
-
-    # Only proceed if rd is a datetime
-    if isinstance(rd, datetime):
-        window = timedelta(hours=12)
-        # Use the same tz as rd (if aware); otherwise naive now()
-        now = datetime.now()
-        in_window = (rd - window) <= now <= (rd + window)
-
-        # If we're within ±12h of renewal AND first_month_count < 9700 -> condition4 becomes False
-        if in_window and (first_month_count < 9700):
-            condition4 = False
-
-    # Must include condition1, or an account whose credits+upload are fresh gets
-    # skipped entirely and its search data never refreshes - which is what the
-    # message already claims ("all three tables"). This was masked while the
-    # columns_apollo_search mismatch above pinned condition1 to False.
-    if (condition2 and condition3) :
-        print(f"Skipping {email} as it already exists in all three tables with 'completed' status")
-        logging.info(f"Skipping {email} as it already exists in all three tables with 'completed' status")
-        continue
-    # combined_condition = condition1 or condition2 or condition3
-
-    apollo_search_field = {
-        'email': email,
-        'status': 'failed',
-        'last_execution': None,
-        'used_credits': 0,
-        'total_credits': 0,
-        'renews_on': None,
-        'saved_titles': None,
-        'saved_counts': None,
-        'total_saved': None,
-        'netnew_counts': None,
-        'total_netnew': None
-    }
-
-    emails_data = []
-    status = 'failed'
-    apollo_credits_field = {
-        'email': email,
-        'status': status,
-        'last_execution': '',
-        'renewal_date': '',
-        'first_month_credits': 0,
-        'second_month_credits': 0,
-        'third_month_credits': 0,
-        'fourth_month_credits': 0,
-        'fifth_month_credits': 0,
-        'sixth_month_credits': 0,
-        'first_month_provided': 0,
-        'second_month_provided': 0,
-        'third_month_provided': 0,
-        'fourth_month_provided': 0,
-        'fifth_month_provided': 0,
-        'sixth_month_provided': 0
-    }
-    apollo_upload_filed = {
-        'email': email,
-        'data' : [],
-        'status': 'failed',
-        'last_execution': ''
-    }
-    
-    driver = None
-    data = []
-    try:
-        driver = start_driver(email)
-        
-        if driver is None:
-            raise Exception("Failed to initialize driver after all retries")
-        
-        login_if_needed(driver, email, password)
-
-        # ---- Your target page ----
-        driver.get("https://app.apollo.io/#/settings/credits/current")
-        time.sleep(10)
-
-        # The search block below reads this page's text for credits/renewal, and the
-        # logout check right after matches on "log in" - a Cloudflare challenge can
-        # trip both. Clear it before either runs.
-        clear_cloudflare_challenge(driver)
-
-        body_txt = driver.find_element(By.TAG_NAME, "body").text.lower()
-        logout_keywords = [
-            "logged out",
-            "security reasons",
-            "log in",
-            "multiple places",
+    columns_apollo_search = [
+        'email',
+        'status',
+        'last_execution',
+        'used_credits',
+        'total_credits',
+        'renews_on',
+        'saved_titles',
+        'saved_counts',
+        'total_saved',
+        'netnew_counts',
+        'total_netnew',
+        # The search block writes failed_reason on error, so this column exists in the
+        # CSV. It MUST be listed here: read_csv(names=..., header=None) with fewer names
+        # than columns silently promotes the first column to the index, which made
+        # apollo_search_data['email'] return status values - so the email was never found
+        # and condition1 was always False for every account.
+        'failed_reason'
         ]
+    if os.path.exists(APOLLO_SEARCH_DATA_CSV):
+        apollo_search_data = pd.read_csv(
+            APOLLO_SEARCH_DATA_CSV,
+            names=columns_apollo_search,
+            header=None,  # tells pandas the file has no header row
+        )
+    else:
+        apollo_search_data = pd.DataFrame(columns=columns_apollo_search)
 
-        if any(k in body_txt for k in logout_keywords):
-            raise Exception("Apollo forced logout detected")
+    columns_apollo_credits = [
+        'email',
+        'status',
+        'last_execution',
+        'renewal_date',
+        'first_month_credits',
+        'second_month_credits',
+        'third_month_credits',
+        'fourth_month_credits',
+        'fifth_month_credits',
+        'sixth_month_credits',
+        'first_month_provided',
+        'second_month_provided',
+        'third_month_provided',
+        'fourth_month_provided',
+        'fifth_month_provided',
+        'sixth_month_provided'
+        ]
+    if os.path.exists(APOLLO_CREDITS_DATA_CSV):
+        apollo_credits_data = pd.read_csv(
+            APOLLO_CREDITS_DATA_CSV,
+            names=columns_apollo_credits,
+            header=None,  # tells pandas the file has no header row
+        )
+    else:
+        apollo_credits_data = pd.DataFrame(columns=columns_apollo_credits)
 
-        print(f"[{email}] Page loaded successfully")
-    except Exception as e:
-        print(f"[INIT] ERROR during driver initialization or page load: {e}")
-        print(f"[INIT] Exception type: {type(e).__name__}")
-        import traceback
-        print(f"[INIT] Full traceback:\n{traceback.format_exc()}")
-        
-        # Check if driver was successfully created before checking for logout
-        if driver:
-            try:
-                if detect_force_logout(driver):
-                    print("[INIT] Forced logout detected - closing driver")
-                    safe_quit(driver)
-                    time.sleep(10)
-                    cleanup_chrome_processes()
-                    time.sleep(20)
-                    continue
-            except Exception as logout_check_error:
-                print(f"[INIT] Error checking for logout: {logout_check_error}")
-        
-        # If driver initialization failed, cleanup and skip
-        if driver is None:
-            print("[INIT] Driver initialization failed - cleaning up and skipping")
-            cleanup_chrome_processes()
-            time.sleep(10)
+    columns_apollo_upload = [
+        'email',
+        'data_count',
+        'last_uploaded',
+        'status',
+        'last_execution',
+        'monthly_breakdown'
+    ]
+    if os.path.exists(APOLLO_UPLOAD_DATA_CSV):
+        apollo_upload_data = pd.read_csv(
+            APOLLO_UPLOAD_DATA_CSV,
+            names=columns_apollo_upload,
+            header=None,  # tells pandas the file has no header row
+        )
+    else:
+        apollo_upload_data = pd.DataFrame(columns=columns_apollo_upload)
+
+    apollo_upload_details = []
+    apollo_credits_data['renewal_date'] = pd.to_datetime(apollo_credits_data['renewal_date'], errors='coerce', format='%Y-%m-%d %H:%M:%S')
+    final_df = pd.merge(df, apollo_credits_data, left_on='Email', right_on='email', how='left')
+
+    final_df_sorted = final_df.sort_values(by='renewal_date', ascending=True)
+    # input("press input to continue")
+
+    # ONE-TIME STARTUP CLEANUP:
+    # On this machine, launching the scraper's Chrome while ANY Chrome is already
+    # running makes the new process hand off to the existing browser session and exit
+    # ("session not created: Chrome failed to start: crashed"). So close ALL Chrome
+    # (including the personal browser) once, up front, for reliable launches.
+    # IMPORTANT: do NOT open Chrome again while the run is in progress.
+    print("=" * 60)
+    print("[STARTUP] Closing ALL Chrome windows so the scraper can launch cleanly.")
+    print("[STARTUP] This also closes your personal Chrome. Do NOT reopen Chrome during the run.")
+    print("=" * 60)
+    logging.info("[STARTUP] Closing all Chrome before run (auto-close-all mode)")
+    cleanup_chrome_processes()
+
+    email_number = 1
+    for index, row in final_df_sorted.iterrows():
+        email = row["Email"]
+        password = row["2026 june Password"]
+        logging.info(f'Index: {email_number} - Running for {email}')
+        email_number += 1
+
+        # if TARGET_EMAIL and email.lower().strip() not in [s_email.lower().strip() for s_email in TARGET_EMAIL]:
+        #     print(f"Skipping {email} as it is not {TARGET_EMAIL}")
+        #     continue
+        # if (row['renewal_date'] is not None) and (row['renewal_date'] > (datetime.now() + timedelta(days=10))):
+        #     print(f"{email} - Renewal date is more than 10 days from now. Skipping.")
+        #     continue
+        if email.lower().strip() in ['vijay.raghavan@nestack.co.in', 'rahul@nestack.in', 'vijay@nestack.in']:
             continue
-        
-        # If driver exists but other error occurred, keep it open
-        print("[INIT] Error is not a forced logout - driver will remain open")
-        print("[INIT] Continuing with next sections...")
-        # Don't quit driver - let it continue to next sections
-    if driver:
-        print('Driver is started')
-        wait = WebDriverWait(driver, 20)
-    
-    print(f'[CONDITION CHECK] Condition1: {condition1}, Condition2: {condition2}, Condition3: {condition3}')
-    print(f'[CONDITION CHECK] Will process search data: {not condition1}')
-    print(f'[CONDITION CHECK] Will process credits data: {not condition2}')
-    print(f'[CONDITION CHECK] Will process upload data: {not condition3}')
-    
-    # Check if all conditions are True (all sections will be skipped)
-    if condition1 and condition2 and condition3:
-        print(f'[CONDITION CHECK] ⚠️  WARNING: All processing sections will be skipped!')
-        print(f'[CONDITION CHECK] Email was processed recently (within {hours_to_check} hours)')
-        print(f'[CONDITION CHECK] Driver will be closed since there is nothing to process')
-        print(f'[CONDITION CHECK] To force processing, you can:')
-        print(f'[CONDITION CHECK]   1. Wait {hours_to_check} hours since last execution')
-        print(f'[CONDITION CHECK]   2. Delete the email entry from CSV files')
-        print(f'[CONDITION CHECK]   3. Modify the hours_to_check threshold')
-    
-    # condition2 keeps its computed value: credits run ONLY if the existing credits
-    # data is older than hours_to_check (or missing/invalid). No force-run override.
-    
-    if not True:
+
+
+        # If apollo_search_data is not empty and email exists
+        hours_to_check = 22
+        condition1 = False
+        print(f'[CONDITION CHECK] Checking condition1 for {email}...')
+        print(f'[CONDITION CHECK] apollo_search_data empty: {apollo_search_data.empty}')
+        if not apollo_search_data.empty:
+            print(f'[CONDITION CHECK] Email in apollo_search_data: {email in apollo_search_data["email"].values}')
+        if not apollo_search_data.empty and email in apollo_search_data['email'].values:
+            existing_row = apollo_search_data[apollo_search_data['email'] == email].iloc[0]
+            print(f'[CONDITION CHECK] Found existing row - status: {existing_row["status"]}, last_execution: {existing_row["last_execution"]}')
+            
+            # Check if data is actually valid (not empty/failed)
+            saved_titles = existing_row.get('saved_titles', '')
+            saved_counts = existing_row.get('saved_counts', '')
+            total_saved = existing_row.get('total_saved', 0)
+            
+            # Check if saved_titles is empty or just contains empty strings
+            has_valid_titles = False
+            if saved_titles and str(saved_titles).strip() and str(saved_titles) not in ['', 'nan', 'None']:
+                # Check if it's not just an empty tuple representation
+                if not (str(saved_titles).strip().startswith("('')") or str(saved_titles).strip() == "('',)"):
+                    has_valid_titles = True
+            
+            # Check if total_saved is meaningful (greater than 0)
+            has_valid_data = False
+            try:
+                total_saved_val = float(total_saved) if total_saved else 0
+                if total_saved_val > 0:
+                    has_valid_data = True
+            except:
+                pass
+            
+            print(f'[CONDITION CHECK] Data validation - saved_titles: "{saved_titles}", total_saved: {total_saved}')
+            print(f'[CONDITION CHECK] Has valid titles: {has_valid_titles}, Has valid data (total_saved > 0): {has_valid_data}')
+            
+            time_diff = datetime.now() - pd.to_datetime(existing_row['last_execution'])
+            print(f'[CONDITION CHECK] Time since last execution: {time_diff.total_seconds() / 3600:.2f} hours (threshold: {hours_to_check} hours)')
+            
+            # Only skip if: status is completed AND within time threshold AND has valid data
+            if (existing_row['status'] == 'completed') and (pd.to_datetime(existing_row['last_execution']) > (datetime.now() - timedelta(hours=hours_to_check))):
+                if has_valid_titles or has_valid_data:
+                    logging.info(f'Last execution was on {existing_row['last_execution']} for email {email} and current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')
+                    logging.info(f"Skipping {email} as it already exists in apollo_search_data with 'completed' status and valid data")
+                    print(f'[CONDITION CHECK] Last execution was on {existing_row['last_execution']} for email {email} and current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}')
+                    print(f'[CONDITION CHECK] Skipping {email} - status is "completed" with valid data')
+                    condition1 = True
+                else:
+                    print(f'[CONDITION CHECK] ⚠️  Status is "completed" but data is empty/invalid - will reprocess')
+                    print(f'[CONDITION CHECK] Previous run appears to have failed despite "completed" status')
+                    condition1 = False
+            else:
+                print(f'[CONDITION CHECK] Not skipping - status: {existing_row["status"]} or time check failed')
+        else:
+            print(f'[CONDITION CHECK] Email not found in apollo_search_data or data is empty, condition1 remains False')
+
         condition2 = False
+        if not apollo_credits_data.empty and email in apollo_credits_data['email'].values:
+            existing_row = apollo_credits_data[apollo_credits_data['email'] == email].iloc[0]
+            
+            # Check if credits data is actually valid
+            first_month_credits = existing_row.get('first_month_credits', 0)
+            renewal_date = existing_row.get('renewal_date', '')
+            
+            has_valid_credits = False
+            try:
+                # Don't test `if first_month_credits` - 0.0 is falsy but is a real value
+                # (a fresh account genuinely can have 0 credits used), which would make a
+                # legitimate zero row look invalid and reprocess on every run.
+                if pd.notna(first_month_credits) and str(first_month_credits) not in ['', 'nan', 'None', '-1']:
+                    first_month_val = float(first_month_credits)
+                    if first_month_val >= 0:  # Valid if >= 0 (0 is also valid)
+                        has_valid_credits = True
+            except:
+                pass
+            
+            has_valid_renewal = renewal_date and str(renewal_date) not in ['', 'nan', 'None']
+            
+            print(f'[CONDITION CHECK] Credits data validation - first_month_credits: {first_month_credits}, renewal_date: {renewal_date}')
+            print(f'[CONDITION CHECK] Has valid credits: {has_valid_credits}, Has valid renewal: {has_valid_renewal}')
+            
+            if (existing_row['status'] == 'completed') and (pd.to_datetime(existing_row['last_execution']) > (datetime.now() - timedelta(hours=hours_to_check))):
+                # BOTH must be present. With `or`, a row that had a renewal_date but no
+                # month values at all counted as "valid" and was skipped, so the empty
+                # data stuck for hours_to_check and the 'will reprocess' branch below
+                # could never fire for the exact rows it was written to catch.
+                if has_valid_credits and has_valid_renewal:
+                    print(f"[CONDITION CHECK] Skipping {email} as it already exists in apollo_credits_data with 'completed' status and valid data")
+                    logging.info(f"Skipping {email} as it already exists in apollo_credits_data with 'completed' status")
+                    condition2 = True
+                else:
+                    print(f'[CONDITION CHECK] ⚠️  Credits status is "completed" but data is invalid - will reprocess')
+                    condition2 = False
+            else:
+                condition2 = False
+
         condition3 = False
-        print(f'[SEARCH DATA] Starting search data extraction for {email}')
-        print(f'[SEARCH DATA] Condition1: {condition1}, Condition2: {condition2}')
-        print(f'[SEARCH DATA] Driver status: {"Valid" if driver else "None/Invalid"}')
+        if not apollo_upload_data.empty and email in apollo_upload_data['email'].values:
+            existing_row = apollo_upload_data[apollo_upload_data['email'] == email].iloc[0]
+            
+            # Check if upload data is actually valid
+            data_count = existing_row.get('data_count', 0)
+            monthly_breakdown = existing_row.get('monthly_breakdown', '')
+            
+            has_valid_count = False
+            try:
+                if data_count and str(data_count) not in ['', 'nan', 'None']:
+                    count_val = float(data_count)
+                    if count_val > 0:
+                        has_valid_count = True
+            except:
+                pass
+            
+            has_valid_breakdown = monthly_breakdown and str(monthly_breakdown) not in ['', 'nan', 'None', '[]']
+            
+            print(f'[CONDITION CHECK] Upload data validation - data_count: {data_count}, monthly_breakdown: {str(monthly_breakdown)[:50]}...')
+            print(f'[CONDITION CHECK] Has valid count: {has_valid_count}, Has valid breakdown: {has_valid_breakdown}')
+            
+            if (existing_row['status'] == 'completed') and (pd.to_datetime(existing_row['last_execution']) > (datetime.now() - timedelta(hours=hours_to_check))):
+                if has_valid_count or has_valid_breakdown:
+                    print(f"[CONDITION CHECK] Skipping {email} as it already exists in apollo_upload_data with 'completed' status and valid data")
+                    logging.info(f"Skipping {email} as it already exists in apollo_upload_data with 'completed' status")
+                    condition3 = True
+                else:
+                    print(f'[CONDITION CHECK] ⚠️  Upload status is "completed" but data is invalid - will reprocess')
+                    condition3 = False
+            else:
+                condition3 = False
+
+
+        condition4 = True
+
+        rd = row.get('renewal_date')
+        fm = row.get('first_month_credits')
+
+        # Parse first_month robustly
+        def to_int(x, default=0):
+            try:
+                return int(x)
+            except (TypeError, ValueError):
+                return default
+
+        first_month_count = to_int(fm, 0)
+
+        # Only proceed if rd is a datetime
+        if isinstance(rd, datetime):
+            window = timedelta(hours=12)
+            # Use the same tz as rd (if aware); otherwise naive now()
+            now = datetime.now()
+            in_window = (rd - window) <= now <= (rd + window)
+
+            # If we're within ±12h of renewal AND first_month_count < 9700 -> condition4 becomes False
+            if in_window and (first_month_count < 9700):
+                condition4 = False
+
+        # Must include condition1, or an account whose credits+upload are fresh gets
+        # skipped entirely and its search data never refreshes - which is what the
+        # message already claims ("all three tables"). This was masked while the
+        # columns_apollo_search mismatch above pinned condition1 to False.
+        if (condition2 and condition3) :
+            print(f"Skipping {email} as it already exists in all three tables with 'completed' status")
+            logging.info(f"Skipping {email} as it already exists in all three tables with 'completed' status")
+            continue
+        # combined_condition = condition1 or condition2 or condition3
+
+        apollo_search_field = {
+            'email': email,
+            'status': 'failed',
+            'last_execution': None,
+            'used_credits': 0,
+            'total_credits': 0,
+            'renews_on': None,
+            'saved_titles': None,
+            'saved_counts': None,
+            'total_saved': None,
+            'netnew_counts': None,
+            'total_netnew': None
+        }
+
+        emails_data = []
+        status = 'failed'
+        apollo_credits_field = {
+            'email': email,
+            'status': status,
+            'last_execution': '',
+            'renewal_date': '',
+            'first_month_credits': 0,
+            'second_month_credits': 0,
+            'third_month_credits': 0,
+            'fourth_month_credits': 0,
+            'fifth_month_credits': 0,
+            'sixth_month_credits': 0,
+            'first_month_provided': 0,
+            'second_month_provided': 0,
+            'third_month_provided': 0,
+            'fourth_month_provided': 0,
+            'fifth_month_provided': 0,
+            'sixth_month_provided': 0
+        }
+        apollo_upload_filed = {
+            'email': email,
+            'data' : [],
+            'status': 'failed',
+            'last_execution': ''
+        }
         
+        driver = None
+        data = []
         try:
-            # Wrap the entire search data extraction in try-catch to prevent driver from closing
-            try:
-                print(f'[SEARCH DATA] Getting page text from driver...')
-                if driver is None:
-                    raise Exception("Driver is None - cannot proceed")
-                print(f'[SEARCH DATA] Current URL: {driver.current_url if driver else "N/A"}')
-                page_text = driver.find_element(By.TAG_NAME, 'body').text
-                print(f'[SEARCH DATA] Page text retrieved, length: {len(page_text)} characters')
-            except Exception as page_error:
-                print(f'[SEARCH DATA] ERROR getting page text: {page_error}')
-                print(f'[SEARCH DATA] Driver will remain open, continuing with next section...')
-                raise  # Re-raise to be caught by outer try-catch
+            driver = start_driver(email)
+            
+            if driver is None:
+                raise Exception("Failed to initialize driver after all retries")
+            
+            login_if_needed(driver, email, password)
 
-            # Use the same layout-agnostic extraction as the credits section. This block
-            # used to carry its own copy of the old single-layout regexes, which is why
-            # nearly every apollo_search_data row has used_credits=0 / total_credits=0
-            # and an empty renews_on: those accounts are simply on a layout the old
-            # pattern never matched. page_text is body text, which the donut needs.
-            used_credits, total_credits = extract_credit_usage(page_text)
-            renewal_date = extract_renewal_date(
-                body_text=page_text,
-                current_url=driver.current_url,
-            )
-            print(f'[SEARCH DATA] used={used_credits} total={total_credits} renews_on={renewal_date}')
-            try:
-                print('[SAVED SEARCHES] Trying to navigate for save')
-                if driver is None:
-                    raise Exception("Driver is None - cannot navigate")
-                print(f'[SAVED SEARCHES] Current URL: {driver.current_url}')
-                try:
-                    navigate_saved_searches()
-                    print(f"[SAVED SEARCHES] Navigated successfully, current URL: {driver.current_url}")
-                except Exception as nav_error:
-                    print(f'[SAVED SEARCHES] ERROR during navigation: {nav_error}')
-                    print(f'[SAVED SEARCHES] Driver will remain open, continuing...')
-                    raise
+            # ---- Your target page ----
+            driver.get("https://app.apollo.io/#/settings/credits/current")
+            time.sleep(10)
 
-                titles = []
+            # The search block below reads this page's text for credits/renewal, and the
+            # logout check right after matches on "log in" - a Cloudflare challenge can
+            # trip both. Clear it before either runs.
+            clear_cloudflare_challenge(driver)
+
+            body_txt = driver.find_element(By.TAG_NAME, "body").text.lower()
+            logout_keywords = [
+                "logged out",
+                "security reasons",
+                "log in",
+                "multiple places",
+            ]
+
+            if any(k in body_txt for k in logout_keywords):
+                raise Exception("Apollo forced logout detected")
+
+            print(f"[{email}] Page loaded successfully")
+        except Exception as e:
+            print(f"[INIT] ERROR during driver initialization or page load: {e}")
+            print(f"[INIT] Exception type: {type(e).__name__}")
+            import traceback
+            print(f"[INIT] Full traceback:\n{traceback.format_exc()}")
+            
+            # Check if driver was successfully created before checking for logout
+            if driver:
                 try:
-                    print(f"[SAVED SEARCHES] Looking for pinned icon elements...")
+                    if detect_force_logout(driver):
+                        print("[INIT] Forced logout detected - closing driver")
+                        safe_quit(driver)
+                        time.sleep(10)
+                        cleanup_chrome_processes()
+                        time.sleep(20)
+                        continue
+                except Exception as logout_check_error:
+                    print(f"[INIT] Error checking for logout: {logout_check_error}")
+            
+            # If driver initialization failed, cleanup and skip
+            if driver is None:
+                print("[INIT] Driver initialization failed - cleaning up and skipping")
+                cleanup_chrome_processes()
+                time.sleep(10)
+                continue
+            
+            # If driver exists but other error occurred, keep it open
+            print("[INIT] Error is not a forced logout - driver will remain open")
+            print("[INIT] Continuing with next sections...")
+            # Don't quit driver - let it continue to next sections
+        if driver:
+            print('Driver is started')
+            wait = WebDriverWait(driver, 20)
+        
+        print(f'[CONDITION CHECK] Condition1: {condition1}, Condition2: {condition2}, Condition3: {condition3}')
+        print(f'[CONDITION CHECK] Will process search data: {not condition1}')
+        print(f'[CONDITION CHECK] Will process credits data: {not condition2}')
+        print(f'[CONDITION CHECK] Will process upload data: {not condition3}')
+        
+        # Check if all conditions are True (all sections will be skipped)
+        if condition1 and condition2 and condition3:
+            print(f'[CONDITION CHECK] ⚠️  WARNING: All processing sections will be skipped!')
+            print(f'[CONDITION CHECK] Email was processed recently (within {hours_to_check} hours)')
+            print(f'[CONDITION CHECK] Driver will be closed since there is nothing to process')
+            print(f'[CONDITION CHECK] To force processing, you can:')
+            print(f'[CONDITION CHECK]   1. Wait {hours_to_check} hours since last execution')
+            print(f'[CONDITION CHECK]   2. Delete the email entry from CSV files')
+            print(f'[CONDITION CHECK]   3. Modify the hours_to_check threshold')
+        
+        # condition2 keeps its computed value: credits run ONLY if the existing credits
+        # data is older than hours_to_check (or missing/invalid). No force-run override.
+        
+        if not True:
+            condition2 = False
+            condition3 = False
+            print(f'[SEARCH DATA] Starting search data extraction for {email}')
+            print(f'[SEARCH DATA] Condition1: {condition1}, Condition2: {condition2}')
+            print(f'[SEARCH DATA] Driver status: {"Valid" if driver else "None/Invalid"}')
+            
+            try:
+                # Wrap the entire search data extraction in try-catch to prevent driver from closing
+                try:
+                    print(f'[SEARCH DATA] Getting page text from driver...')
                     if driver is None:
-                        raise Exception("Driver is None - cannot find elements")
-                    icon_elements = driver.find_elements(By.XPATH, "//i[contains(@class, 'mdi-pin')]")
-                    print(f"[SAVED SEARCHES] Found {len(icon_elements)} icon elements")
-                except Exception as find_error:
-                    print(f'[SAVED SEARCHES] ERROR finding icon elements: {find_error}')
-                    print(f'[SAVED SEARCHES] Driver will remain open, continuing with empty titles list...')
-                    icon_elements = []
+                        raise Exception("Driver is None - cannot proceed")
+                    print(f'[SEARCH DATA] Current URL: {driver.current_url if driver else "N/A"}')
+                    page_text = driver.find_element(By.TAG_NAME, 'body').text
+                    print(f'[SEARCH DATA] Page text retrieved, length: {len(page_text)} characters')
+                except Exception as page_error:
+                    print(f'[SEARCH DATA] ERROR getting page text: {page_error}')
+                    print(f'[SEARCH DATA] Driver will remain open, continuing with next section...')
+                    raise  # Re-raise to be caught by outer try-catch
 
-                for idx, element in enumerate(icon_elements):
+                # Use the same layout-agnostic extraction as the credits section. This block
+                # used to carry its own copy of the old single-layout regexes, which is why
+                # nearly every apollo_search_data row has used_credits=0 / total_credits=0
+                # and an empty renews_on: those accounts are simply on a layout the old
+                # pattern never matched. page_text is body text, which the donut needs.
+                used_credits, total_credits = extract_credit_usage(page_text)
+                renewal_date = extract_renewal_date(
+                    body_text=page_text,
+                    current_url=driver.current_url,
+                )
+                print(f'[SEARCH DATA] used={used_credits} total={total_credits} renews_on={renewal_date}')
+                try:
+                    print('[SAVED SEARCHES] Trying to navigate for save')
+                    if driver is None:
+                        raise Exception("Driver is None - cannot navigate")
+                    print(f'[SAVED SEARCHES] Current URL: {driver.current_url}')
                     try:
-                        print(f"[SAVED SEARCHES] Processing icon element {idx + 1}/{len(icon_elements)}")
-                        parent = element.find_element(By.XPATH, "..")
-                        grandparent = parent.find_element(By.XPATH, "..").find_element(By.XPATH, "..").get_attribute("outerHTML")
-                        soup = BeautifulSoup(grandparent, "html.parser")
-                        icon_element = soup.find("i", class_="mdi")
-                        if icon_element and "mdi-pin" in icon_element.get("class", []):
-                            parent_element = icon_element.parent
-                            adjacent_span = parent_element.find_next("span")
-                            if adjacent_span:
-                                adjacent_text = adjacent_span.get_text(strip=True)
-                                titles.append(adjacent_text)
-                                print(f"[SAVED SEARCHES] Added title: {adjacent_text}")
-                    except Exception as e:
-                        print(f"[SAVED SEARCHES] Error processing icon element {idx + 1}: {e}")
+                        navigate_saved_searches()
+                        print(f"[SAVED SEARCHES] Navigated successfully, current URL: {driver.current_url}")
+                    except Exception as nav_error:
+                        print(f'[SAVED SEARCHES] ERROR during navigation: {nav_error}')
+                        print(f'[SAVED SEARCHES] Driver will remain open, continuing...')
+                        raise
 
-                print(f"[SAVED SEARCHES] Total titles found: {len(titles)}")
-                if len(titles) == 0:
-                    print("[SAVED SEARCHES] WARNING: No pinned titles found! Titles list is empty.")
-                    print("[SAVED SEARCHES] This might mean:")
-                    print("[SAVED SEARCHES]   1. No pinned searches exist")
-                    print("[SAVED SEARCHES]   2. Page structure changed")
-                    print("[SAVED SEARCHES]   3. Browser window closed or page not loaded correctly")
-                    print(f"[SAVED SEARCHES] Current URL: {driver.current_url if driver else 'Driver is None'}")
-                    print(f"[SAVED SEARCHES] Driver window handles: {len(driver.window_handles) if driver else 0}")
-                    print("[SAVED SEARCHES] Triggering fallback method (views dropdown)...")
-                    # Raise exception to trigger fallback method immediately
-                    raise Exception("No pinned elements found - triggering fallback method (views dropdown)")
-                
-                searches = dict()
-                netnew = dict()
-                print(f"[SAVED SEARCHES] going for net new - will process {len(titles)} titles")
-                
-                # Process titles if we have any
-                if len(titles) > 0:
-                    for title_idx, title in enumerate(titles):
-                        print(f"[SAVED SEARCHES] Processing title {title_idx + 1}/{len(titles)}: '{title}'")
-                        # Check if driver is still valid
-                        try:
-                            if driver is None:
-                                print("[SAVED SEARCHES] ERROR: Driver is None! Cannot continue.")
-                                break
-                            # Check if browser window is still open
-                            driver.current_url
-                            print(f"[SAVED SEARCHES] Driver is valid, current URL: {driver.current_url}")
-                        except Exception as driver_check_error:
-                            print(f"[SAVED SEARCHES] ERROR: Driver is no longer valid: {driver_check_error}")
-                            print("[SAVED SEARCHES] Browser may have closed unexpectedly")
-                            break
-                        
-                        try:
-                            print(f"[SAVED SEARCHES] Initializing search dicts for '{title}'")
-                            searches[title] = 0
-                            netnew[title] = 0
-                            xpath_expression = f"(//span[contains(., '{title}')])[1]"
-                            print(f"[SAVED SEARCHES] Waiting for element with XPath: {xpath_expression}")
-                            try:
-                                if driver is None or wait is None:
-                                    raise Exception("Driver or wait is None")
-                                title_div = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_expression)))
-                                print(f"[SAVED SEARCHES] Element found, clicking on '{title}'")
-                                title_div.click()
-                                print(f"[SAVED SEARCHES] Clicked on '{title}', waiting 2 seconds...")
-                                time.sleep(2)
-                            except Exception as click_error:
-                                print(f'[SAVED SEARCHES] ERROR clicking on title "{title}": {click_error}')
-                                print(f'[SAVED SEARCHES] Skipping this title, driver remains open...')
-                                continue  # Skip to next title instead of breaking
+                    titles = []
+                    try:
+                        print(f"[SAVED SEARCHES] Looking for pinned icon elements...")
+                        if driver is None:
+                            raise Exception("Driver is None - cannot find elements")
+                        icon_elements = driver.find_elements(By.XPATH, "//i[contains(@class, 'mdi-pin')]")
+                        print(f"[SAVED SEARCHES] Found {len(icon_elements)} icon elements")
+                    except Exception as find_error:
+                        print(f'[SAVED SEARCHES] ERROR finding icon elements: {find_error}')
+                        print(f'[SAVED SEARCHES] Driver will remain open, continuing with empty titles list...')
+                        icon_elements = []
 
-                            print(f"[SAVED SEARCHES] Looking for saved links after clicking '{title}'")
+                    for idx, element in enumerate(icon_elements):
+                        try:
+                            print(f"[SAVED SEARCHES] Processing icon element {idx + 1}/{len(icon_elements)}")
+                            parent = element.find_element(By.XPATH, "..")
+                            grandparent = parent.find_element(By.XPATH, "..").find_element(By.XPATH, "..").get_attribute("outerHTML")
+                            soup = BeautifulSoup(grandparent, "html.parser")
+                            icon_element = soup.find("i", class_="mdi")
+                            if icon_element and "mdi-pin" in icon_element.get("class", []):
+                                parent_element = icon_element.parent
+                                adjacent_span = parent_element.find_next("span")
+                                if adjacent_span:
+                                    adjacent_text = adjacent_span.get_text(strip=True)
+                                    titles.append(adjacent_text)
+                                    print(f"[SAVED SEARCHES] Added title: {adjacent_text}")
+                        except Exception as e:
+                            print(f"[SAVED SEARCHES] Error processing icon element {idx + 1}: {e}")
+
+                    print(f"[SAVED SEARCHES] Total titles found: {len(titles)}")
+                    if len(titles) == 0:
+                        print("[SAVED SEARCHES] WARNING: No pinned titles found! Titles list is empty.")
+                        print("[SAVED SEARCHES] This might mean:")
+                        print("[SAVED SEARCHES]   1. No pinned searches exist")
+                        print("[SAVED SEARCHES]   2. Page structure changed")
+                        print("[SAVED SEARCHES]   3. Browser window closed or page not loaded correctly")
+                        print(f"[SAVED SEARCHES] Current URL: {driver.current_url if driver else 'Driver is None'}")
+                        print(f"[SAVED SEARCHES] Driver window handles: {len(driver.window_handles) if driver else 0}")
+                        print("[SAVED SEARCHES] Triggering fallback method (views dropdown)...")
+                        # Raise exception to trigger fallback method immediately
+                        raise Exception("No pinned elements found - triggering fallback method (views dropdown)")
+                    
+                    searches = dict()
+                    netnew = dict()
+                    print(f"[SAVED SEARCHES] going for net new - will process {len(titles)} titles")
+                    
+                    # Process titles if we have any
+                    if len(titles) > 0:
+                        for title_idx, title in enumerate(titles):
+                            print(f"[SAVED SEARCHES] Processing title {title_idx + 1}/{len(titles)}: '{title}'")
+                            # Check if driver is still valid
                             try:
                                 if driver is None:
-                                    raise Exception("Driver is None")
-                                saved_links = driver.find_elements(By.XPATH, "//a[contains(@class, 'zp-link')]")
-                                print(f"[SAVED SEARCHES] Found {len(saved_links)} saved links")
-                            except Exception as link_error:
-                                print(f'[SAVED SEARCHES] ERROR finding saved links: {link_error}')
-                                print(f'[SAVED SEARCHES] Continuing with empty links list...')
-                                saved_links = []
-                            for link_idx, link in enumerate(saved_links):
-                                if "Saved" in link.text:
-                                    adjacent_text = link.text.replace("Saved", "").strip()
-                                    if "(" in adjacent_text and ")" in adjacent_text:
-                                        saved_count = adjacent_text.lstrip("(").rstrip(")").strip()
-                                        if saved_count[-1].lower() == "k":
-                                            saved_count = float(saved_count[:-1]) * 1000
-                                        else:
-                                            saved_count = float(saved_count)
-                                        searches[title] = saved_count
-                                if "Net New" in link.text:
-                                    adjacent_text = link.text.replace("Net New", "").strip()
-                                    if "(" in adjacent_text and ")" in adjacent_text:
-                                        netnew_count = adjacent_text.lstrip("(").rstrip(")").strip()
-                                        if netnew_count[-1].lower() == "k":
-                                            netnew_count = float(netnew_count[:-1]) * 1000
-                                        elif netnew_count[-1].lower() == "m":
-                                            netnew_count = float(netnew_count[:-1]) * 1000000
-                                        else:
-                                            netnew_count = float(netnew_count)
-                                        netnew[title] = netnew_count
-                                        print(f"[SAVED SEARCHES] Found Net New count for '{title}': {netnew_count}")
-                            print(f"[SAVED SEARCHES] Completed processing '{title}', navigating back...")
+                                    print("[SAVED SEARCHES] ERROR: Driver is None! Cannot continue.")
+                                    break
+                                # Check if browser window is still open
+                                driver.current_url
+                                print(f"[SAVED SEARCHES] Driver is valid, current URL: {driver.current_url}")
+                            except Exception as driver_check_error:
+                                print(f"[SAVED SEARCHES] ERROR: Driver is no longer valid: {driver_check_error}")
+                                print("[SAVED SEARCHES] Browser may have closed unexpectedly")
+                                break
+                            
                             try:
-                                navigate_saved_searches()
-                                print(f"[SAVED SEARCHES] Navigation complete for '{title}'")
-                            except Exception as nav_back_error:
-                                print(f'[SAVED SEARCHES] ERROR navigating back: {nav_back_error}')
-                                print(f'[SAVED SEARCHES] Driver remains open, continuing...')
-                        except Exception as e:
-                            print(f"[SAVED SEARCHES] ERROR processing title '{title}': {e}")
-                            print(f"[SAVED SEARCHES] Exception type: {type(e).__name__}")
-                            import traceback
-                            print(f"[SAVED SEARCHES] Traceback: {traceback.format_exc()}")
-                            # update_tracker_failed(email, 'failed')
-                            apollo_credits_data['status'] = 'failed'
-                            apollo_search_field['failed_reason'] = str(e)
-                            print(f"[SAVED SEARCHES] Attempting to navigate back after error...")
-                            try:
-                                if driver is not None:
+                                print(f"[SAVED SEARCHES] Initializing search dicts for '{title}'")
+                                searches[title] = 0
+                                netnew[title] = 0
+                                xpath_expression = f"(//span[contains(., '{title}')])[1]"
+                                print(f"[SAVED SEARCHES] Waiting for element with XPath: {xpath_expression}")
+                                try:
+                                    if driver is None or wait is None:
+                                        raise Exception("Driver or wait is None")
+                                    title_div = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_expression)))
+                                    print(f"[SAVED SEARCHES] Element found, clicking on '{title}'")
+                                    title_div.click()
+                                    print(f"[SAVED SEARCHES] Clicked on '{title}', waiting 2 seconds...")
+                                    time.sleep(2)
+                                except Exception as click_error:
+                                    print(f'[SAVED SEARCHES] ERROR clicking on title "{title}": {click_error}')
+                                    print(f'[SAVED SEARCHES] Skipping this title, driver remains open...')
+                                    continue  # Skip to next title instead of breaking
+
+                                print(f"[SAVED SEARCHES] Looking for saved links after clicking '{title}'")
+                                try:
+                                    if driver is None:
+                                        raise Exception("Driver is None")
+                                    saved_links = driver.find_elements(By.XPATH, "//a[contains(@class, 'zp-link')]")
+                                    print(f"[SAVED SEARCHES] Found {len(saved_links)} saved links")
+                                except Exception as link_error:
+                                    print(f'[SAVED SEARCHES] ERROR finding saved links: {link_error}')
+                                    print(f'[SAVED SEARCHES] Continuing with empty links list...')
+                                    saved_links = []
+                                for link_idx, link in enumerate(saved_links):
+                                    if "Saved" in link.text:
+                                        adjacent_text = link.text.replace("Saved", "").strip()
+                                        if "(" in adjacent_text and ")" in adjacent_text:
+                                            saved_count = adjacent_text.lstrip("(").rstrip(")").strip()
+                                            if saved_count[-1].lower() == "k":
+                                                saved_count = float(saved_count[:-1]) * 1000
+                                            else:
+                                                saved_count = float(saved_count)
+                                            searches[title] = saved_count
+                                    if "Net New" in link.text:
+                                        adjacent_text = link.text.replace("Net New", "").strip()
+                                        if "(" in adjacent_text and ")" in adjacent_text:
+                                            netnew_count = adjacent_text.lstrip("(").rstrip(")").strip()
+                                            if netnew_count[-1].lower() == "k":
+                                                netnew_count = float(netnew_count[:-1]) * 1000
+                                            elif netnew_count[-1].lower() == "m":
+                                                netnew_count = float(netnew_count[:-1]) * 1000000
+                                            else:
+                                                netnew_count = float(netnew_count)
+                                            netnew[title] = netnew_count
+                                            print(f"[SAVED SEARCHES] Found Net New count for '{title}': {netnew_count}")
+                                print(f"[SAVED SEARCHES] Completed processing '{title}', navigating back...")
+                                try:
                                     navigate_saved_searches()
-                                    print(f"[SAVED SEARCHES] Navigation complete after error")
-                            except Exception as nav_error:
-                                print(f'[SAVED SEARCHES] ERROR during error recovery navigation: {nav_error}')
-                                print(f'[SAVED SEARCHES] Driver remains open, continuing...')
-                
-                if len(titles) == 0:
-                    print("[SAVED SEARCHES] No titles were processed, searches and netnew dicts remain empty")
-            except Exception as e:
-                print(f"[SAVED SEARCHES] Outer exception caught: {e}")
-                print(f"[SAVED SEARCHES] Exception type: {type(e).__name__}")
-                import traceback
-                print(f"[SAVED SEARCHES] Full traceback: {traceback.format_exc()}")
-                print(f"[SAVED SEARCHES] Falling back to alternative method (navigate_saved_searches2)")
-                try:
-                    if driver is not None:
-                        navigate_saved_searches2()
-                    else:
-                        print(f"[SAVED SEARCHES] Cannot use fallback - driver is None")
-                except Exception as fallback_error:
-                    print(f'[SAVED SEARCHES] ERROR in fallback navigation: {fallback_error}')
-                    print(f'[SAVED SEARCHES] Driver remains open, continuing...')
-                searches = dict()
-                netnew = dict()
-                titles = ['Net New', 'Saved']
-                print(f"[SAVED SEARCHES] Using fallback titles: {titles}")
+                                    print(f"[SAVED SEARCHES] Navigation complete for '{title}'")
+                                except Exception as nav_back_error:
+                                    print(f'[SAVED SEARCHES] ERROR navigating back: {nav_back_error}')
+                                    print(f'[SAVED SEARCHES] Driver remains open, continuing...')
+                            except Exception as e:
+                                print(f"[SAVED SEARCHES] ERROR processing title '{title}': {e}")
+                                print(f"[SAVED SEARCHES] Exception type: {type(e).__name__}")
+                                import traceback
+                                print(f"[SAVED SEARCHES] Traceback: {traceback.format_exc()}")
+                                # update_tracker_failed(email, 'failed')
+                                apollo_credits_data['status'] = 'failed'
+                                apollo_search_field['failed_reason'] = str(e)
+                                print(f"[SAVED SEARCHES] Attempting to navigate back after error...")
+                                try:
+                                    if driver is not None:
+                                        navigate_saved_searches()
+                                        print(f"[SAVED SEARCHES] Navigation complete after error")
+                                except Exception as nav_error:
+                                    print(f'[SAVED SEARCHES] ERROR during error recovery navigation: {nav_error}')
+                                    print(f'[SAVED SEARCHES] Driver remains open, continuing...')
+                    
+                    if len(titles) == 0:
+                        print("[SAVED SEARCHES] No titles were processed, searches and netnew dicts remain empty")
+                except Exception as e:
+                    print(f"[SAVED SEARCHES] Outer exception caught: {e}")
+                    print(f"[SAVED SEARCHES] Exception type: {type(e).__name__}")
+                    import traceback
+                    print(f"[SAVED SEARCHES] Full traceback: {traceback.format_exc()}")
+                    print(f"[SAVED SEARCHES] Falling back to alternative method (navigate_saved_searches2)")
+                    try:
+                        if driver is not None:
+                            navigate_saved_searches2()
+                        else:
+                            print(f"[SAVED SEARCHES] Cannot use fallback - driver is None")
+                    except Exception as fallback_error:
+                        print(f'[SAVED SEARCHES] ERROR in fallback navigation: {fallback_error}')
+                        print(f'[SAVED SEARCHES] Driver remains open, continuing...')
+                    searches = dict()
+                    netnew = dict()
+                    titles = ['Net New', 'Saved']
+                    print(f"[SAVED SEARCHES] Using fallback titles: {titles}")
 
-                try:
-                    if driver is None or wait is None:
-                        raise Exception("Driver or wait is None")
-                    view_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-name='views']")))
-                    view_button.click()
-                    time.sleep(1)
-
-                    your_views_tab = wait.until(EC.element_to_be_clickable((By.ID, "private")))
-                    your_views_tab.click()
-                    time.sleep(1)
-
-                    view_options = wait.until(EC.presence_of_all_elements_located((By.XPATH, "//div[@role='option']")))
-                    time.sleep(1)
-                    view_options[0].click()
-                    time.sleep(2)
-                except Exception as view_error:
-                    print(f'[SAVED SEARCHES] ERROR in fallback view selection: {view_error}')
-                    print(f'[SAVED SEARCHES] Driver remains open, skipping view processing...')
-                    view_options = []
-
-                print(f'[SAVED SEARCHES] Starting to process {len(view_options)} view options')
-                for i in range(len(view_options)):
-                    print(f'[SAVED SEARCHES] Processing view option {i+1}/{len(view_options)}')
                     try:
                         if driver is None or wait is None:
                             raise Exception("Driver or wait is None")
-                        
-                        print(f'[SAVED SEARCHES] Opening views dropdown...')
                         view_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-name='views']")))
                         view_button.click()
                         time.sleep(1)
 
-                        print(f'[SAVED SEARCHES] Clicking private tab...')
                         your_views_tab = wait.until(EC.element_to_be_clickable((By.ID, "private")))
                         your_views_tab.click()
                         time.sleep(1)
 
-                        print(f'[SAVED SEARCHES] Getting view options...')
                         view_options = wait.until(EC.presence_of_all_elements_located((By.XPATH, "//div[@role='option']")))
-                        view_option_text = view_options[i].text
-                        print(f'[SAVED SEARCHES] Selected view option {i+1}: "{view_option_text}"')
+                        time.sleep(1)
+                        view_options[0].click()
+                        time.sleep(2)
+                    except Exception as view_error:
+                        print(f'[SAVED SEARCHES] ERROR in fallback view selection: {view_error}')
+                        print(f'[SAVED SEARCHES] Driver remains open, skipping view processing...')
+                        view_options = []
 
-                        # Skip empty/placeholder option rows (e.g. a trailing blank "create view" row)
-                        if not view_option_text.strip():
-                            print(f'[SAVED SEARCHES] Skipping empty view option {i+1}')
-                            continue
+                    print(f'[SAVED SEARCHES] Starting to process {len(view_options)} view options')
+                    for i in range(len(view_options)):
+                        print(f'[SAVED SEARCHES] Processing view option {i+1}/{len(view_options)}')
+                        try:
+                            if driver is None or wait is None:
+                                raise Exception("Driver or wait is None")
+                            
+                            print(f'[SAVED SEARCHES] Opening views dropdown...')
+                            view_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-name='views']")))
+                            view_button.click()
+                            time.sleep(1)
 
-                        print(f'[SAVED SEARCHES] Clicking on view option...')
-                        view_options[i].click()
-                        print(f'[SAVED SEARCHES] Waiting 6 seconds for page to load...')
-                        time.sleep(6)
+                            print(f'[SAVED SEARCHES] Clicking private tab...')
+                            your_views_tab = wait.until(EC.element_to_be_clickable((By.ID, "private")))
+                            your_views_tab.click()
+                            time.sleep(1)
 
-                        # Extract data for each title after clicking the view
-                        print(f'[SAVED SEARCHES] Starting data extraction for view "{view_option_text}"')
-                        for title in titles:
-                            print(f"[SAVED SEARCHES] ##### Extracting for '{title}' in view '{view_option_text}' #####")
-                            try:
-                                if driver is None or wait is None:
-                                    raise Exception("Driver or wait is None")
-                                
-                                # The view's count widgets look like:
-                                #   <div class="zp_PfDqP">Net New<div><span data-count-size="small">8.5K</span></div></div>
-                                xpath_expression = f"//div[normalize-space(text())='{title}']//span[@data-count-size]"
-                                print(f"[SAVED SEARCHES] Waiting for element with XPath: {xpath_expression}")
-                                count_element = wait.until(EC.presence_of_element_located((By.XPATH, xpath_expression)))
+                            print(f'[SAVED SEARCHES] Getting view options...')
+                            view_options = wait.until(EC.presence_of_all_elements_located((By.XPATH, "//div[@role='option']")))
+                            view_option_text = view_options[i].text
+                            print(f'[SAVED SEARCHES] Selected view option {i+1}: "{view_option_text}"')
 
-                                count_value = count_element.text.strip()
-                                print(f"[SAVED SEARCHES] Extracted raw count for '{title}': '{count_value}'")
+                            # Skip empty/placeholder option rows (e.g. a trailing blank "create view" row)
+                            if not view_option_text.strip():
+                                print(f'[SAVED SEARCHES] Skipping empty view option {i+1}')
+                                continue
 
-                                # Convert count value
-                                if count_value and len(count_value) > 0:
-                                    if count_value[-1].lower() == 'k':
-                                        count_value = float(count_value[:-1]) * 1000
-                                    elif count_value[-1].lower() == 'm':
-                                        count_value = float(count_value[:-1]) * 1000000
-                                    else:
-                                        count_value = float(count_value)
+                            print(f'[SAVED SEARCHES] Clicking on view option...')
+                            view_options[i].click()
+                            print(f'[SAVED SEARCHES] Waiting 6 seconds for page to load...')
+                            time.sleep(6)
+
+                            # Extract data for each title after clicking the view
+                            print(f'[SAVED SEARCHES] Starting data extraction for view "{view_option_text}"')
+                            for title in titles:
+                                print(f"[SAVED SEARCHES] ##### Extracting for '{title}' in view '{view_option_text}' #####")
+                                try:
+                                    if driver is None or wait is None:
+                                        raise Exception("Driver or wait is None")
                                     
-                                    if title == "Net New":
-                                        netnew[view_option_text] = count_value
-                                        print(f"[SAVED SEARCHES] ✅ Stored Net New for '{view_option_text}': {count_value:,}")
+                                    # The view's count widgets look like:
+                                    #   <div class="zp_PfDqP">Net New<div><span data-count-size="small">8.5K</span></div></div>
+                                    xpath_expression = f"//div[normalize-space(text())='{title}']//span[@data-count-size]"
+                                    print(f"[SAVED SEARCHES] Waiting for element with XPath: {xpath_expression}")
+                                    count_element = wait.until(EC.presence_of_element_located((By.XPATH, xpath_expression)))
+
+                                    count_value = count_element.text.strip()
+                                    print(f"[SAVED SEARCHES] Extracted raw count for '{title}': '{count_value}'")
+
+                                    # Convert count value
+                                    if count_value and len(count_value) > 0:
+                                        if count_value[-1].lower() == 'k':
+                                            count_value = float(count_value[:-1]) * 1000
+                                        elif count_value[-1].lower() == 'm':
+                                            count_value = float(count_value[:-1]) * 1000000
+                                        else:
+                                            count_value = float(count_value)
+                                        
+                                        if title == "Net New":
+                                            netnew[view_option_text] = count_value
+                                            print(f"[SAVED SEARCHES] ✅ Stored Net New for '{view_option_text}': {count_value:,}")
+                                        else:
+                                            searches[view_option_text] = count_value
+                                            print(f"[SAVED SEARCHES] ✅ Stored Saved for '{view_option_text}': {count_value:,}")
                                     else:
-                                        searches[view_option_text] = count_value
-                                        print(f"[SAVED SEARCHES] ✅ Stored Saved for '{view_option_text}': {count_value:,}")
-                                else:
-                                    print(f"[SAVED SEARCHES] ⚠️  Empty count value for '{title}'")
+                                        print(f"[SAVED SEARCHES] ⚠️  Empty count value for '{title}'")
 
-                                time.sleep(2)
+                                    time.sleep(2)
 
-                            except Exception as extract_error:
-                                print(f"[SAVED SEARCHES] ❌ ERROR extracting data for title '{title}' in view '{view_option_text}': {extract_error}")
-                                import traceback
-                                print(f"[SAVED SEARCHES] Traceback: {traceback.format_exc()}")
+                                except Exception as extract_error:
+                                    print(f"[SAVED SEARCHES] ❌ ERROR extracting data for title '{title}' in view '{view_option_text}': {extract_error}")
+                                    import traceback
+                                    print(f"[SAVED SEARCHES] Traceback: {traceback.format_exc()}")
 
-                    except Exception as view_loop_error:
-                        print(f'[SAVED SEARCHES] ❌ ERROR in view loop iteration {i+1}: {view_loop_error}')
-                        print(f'[SAVED SEARCHES] Driver remains open, continuing to next iteration...')
-                        import traceback
-                        print(f'[SAVED SEARCHES] Traceback: {traceback.format_exc()}')
-                        continue
+                        except Exception as view_loop_error:
+                            print(f'[SAVED SEARCHES] ❌ ERROR in view loop iteration {i+1}: {view_loop_error}')
+                            print(f'[SAVED SEARCHES] Driver remains open, continuing to next iteration...')
+                            import traceback
+                            print(f'[SAVED SEARCHES] Traceback: {traceback.format_exc()}')
+                            continue
+                    
+                    print(f'[SAVED SEARCHES] Finished processing all view options')
+                    print(f'[SAVED SEARCHES] Final searches dict: {searches}')
+                    print(f'[SAVED SEARCHES] Final netnew dict: {netnew}')
+
+            
+                print('\n[SAVED SEARCHES] ========== COMPLETED PROCESSING ==========')
+                print(f'[SAVED SEARCHES] Searches dict: {searches}')
+                print(f'[SAVED SEARCHES] NetNew dict: {netnew}')
+                print('[SAVED SEARCHES] Reached here - preparing to save data\n')
+                apollo_search_field['status'] = 'completed'
+                apollo_search_field['last_execution'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                apollo_search_field['used_credits'] = used_credits
+                apollo_search_field['total_credits'] = total_credits
+                apollo_search_field['renews_on'] = renewal_date.strftime('%Y-%m-%d %H:%M:%S') if renewal_date else None
+                apollo_search_field['saved_titles'] = "\n".join(list(searches.keys())) if searches else ""
+                apollo_search_field['saved_counts'] = "\n".join([str(int(i)) for i in list(searches.values())]) if searches else ""
+                apollo_search_field['total_saved'] = sum(list(searches.values())) if searches else 0
+                apollo_search_field['netnew_counts'] = "\n".join([str(int(i)) for i in list(netnew.values())]) if netnew else ""
+                apollo_search_field['total_netnew'] = sum(list(netnew.values())) if netnew else 0
                 
-                print(f'[SAVED SEARCHES] Finished processing all view options')
-                print(f'[SAVED SEARCHES] Final searches dict: {searches}')
-                print(f'[SAVED SEARCHES] Final netnew dict: {netnew}')
-
-        
-            print('\n[SAVED SEARCHES] ========== COMPLETED PROCESSING ==========')
-            print(f'[SAVED SEARCHES] Searches dict: {searches}')
-            print(f'[SAVED SEARCHES] NetNew dict: {netnew}')
-            print('[SAVED SEARCHES] Reached here - preparing to save data\n')
-            apollo_search_field['status'] = 'completed'
-            apollo_search_field['last_execution'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            apollo_search_field['used_credits'] = used_credits
-            apollo_search_field['total_credits'] = total_credits
-            apollo_search_field['renews_on'] = renewal_date.strftime('%Y-%m-%d %H:%M:%S') if renewal_date else None
-            apollo_search_field['saved_titles'] = "\n".join(list(searches.keys())) if searches else ""
-            apollo_search_field['saved_counts'] = "\n".join([str(int(i)) for i in list(searches.values())]) if searches else ""
-            apollo_search_field['total_saved'] = sum(list(searches.values())) if searches else 0
-            apollo_search_field['netnew_counts'] = "\n".join([str(int(i)) for i in list(netnew.values())]) if netnew else ""
-            apollo_search_field['total_netnew'] = sum(list(netnew.values())) if netnew else 0
-            
-            print(f'[SAVED SEARCHES] Data being saved:')
-            print(f'[SAVED SEARCHES]   saved_titles: "{apollo_search_field["saved_titles"]}"')
-            print(f'[SAVED SEARCHES]   saved_counts: "{apollo_search_field["saved_counts"]}"')
-            print(f'[SAVED SEARCHES]   total_saved: {apollo_search_field["total_saved"]}')
-            print(f'[SAVED SEARCHES]   netnew_counts: "{apollo_search_field["netnew_counts"]}"')
-            print(f'[SAVED SEARCHES]   total_netnew: {apollo_search_field["total_netnew"]}')
-            # driver.quit()
-            time.sleep(2)
-
-        except Exception as e:
-            print(f'[SEARCH DATA] ========== TOP LEVEL EXCEPTION ==========')
-            print(f'[SEARCH DATA] Error: {e}')
-            print(f'[SEARCH DATA] Exception type: {type(e).__name__}')
-            import traceback
-            print(f'[SEARCH DATA] Full traceback:\n{traceback.format_exc()}')
-            print(f'[SEARCH DATA] Driver will remain open - error handled gracefully')
-            apollo_search_field['status'] = 'failed'
-            apollo_search_field['failed_reason'] = str(e)
-        # data_field['failed_reason'] = str(e)
-        csv_path = APOLLO_SEARCH_DATA_CSV
-        new_entry = pd.DataFrame([apollo_search_field])  # `data_field` is a dict with the new row
-
-        # Step 1: Load existing CSV (if it exists)
-        if os.path.exists(csv_path):
-            try:
-                df = pd.read_csv(csv_path)
-                df = df[df['email'] != apollo_search_field['email']]
-            except:
-                df = pd.DataFrame()
-
-            # Step 2: Remove rows with same email as new entry
-            
-
-            # Step 3: Append new entry
-            df = pd.concat([new_entry, df], ignore_index=True)
-        else:
-            # First time creating the file
-            df = new_entry
-        safe_save_csv(df, csv_path)
-        if _db:
-            _db.save_row_safe('apollo_search_data', apollo_search_field)
-
-    email_credits = []
-    provided_monthly_credits = []
-    if not condition2:
-        print(f'[CREDITS DATA] Starting credits data extraction for {email}')
-        print(f'[CREDITS DATA] Driver status: {"Valid" if driver else "None/Invalid"}')
-        
-        try:
-            # Wrap entire credits section in try-catch to prevent driver from closing
-            try:
-                # soup = BeautifulSoup(driver.page_source, "html.parser")
-                time.sleep(20)
-                print('[CREDITS DATA] going to credits\n\n')
-                if driver is None:
-                    raise Exception("Driver is None - cannot proceed with credits extraction")
-                driver.get("https://app.apollo.io/#/settings/credits/current")
-                time.sleep(7 + random.uniform(-1, 2))  # wait for page load
-
-                # Drop any Cloudflare challenge BEFORE reading the page: the overlay
-                # leaves the text behind it readable, so without this the renewal/credits
-                # parse can appear to work while the chart never renders.
-                clear_cloudflare_challenge(driver)
-
-                page_text_temp = driver.find_element(By.TAG_NAME, 'body').text
-            except Exception as credits_page_error:
-                print(f'[CREDITS DATA] ERROR loading credits page: {credits_page_error}')
-                print(f'[CREDITS DATA] Driver will remain open, continuing...')
-                raise  # Re-raise to be caught by outer try-catch
-            # Works across all known layouts (credits/mo, emails/mo, new donut UI).
-            used_credits, total_credits_provided = extract_credit_usage(page_text_temp)
-
-            # Parse the page source
-            page_source = driver.page_source
-            soup = BeautifulSoup(page_source, "html.parser")
-            page_text = soup.get_text()
-            time.sleep(1 + random.uniform(-1, 2))
-
-            renewal_date = extract_renewal_date(
-                body_text=page_text_temp,
-                soup_text=page_text,
-                current_url=driver.current_url,
-            )
-
-            if not renewal_date:
-                # Genuinely unreadable: an unchallenged page whose renewal text is
-                # missing in every known form AND whose URL carries no minDate.
-                # Raise rather than `continue` - a bare continue skipped both the CSV
-                # save below (losing the 'failed' status) and safe_quit(driver) at the
-                # end of the loop, which leaked Chrome and locked the next profile.
-                print('[CREDITS DATA] Renewal date not found in any known layout')
-                logging.info(f'{email}: renewal date not found in any known layout')
-                raise Exception('renewal date not found (unrecognised credits layout)')
-
-            dates = get_past_renewal_credit_periods(renewal_date)
-            days_to_renew = (renewal_date - datetime.now()) <= timedelta(days=7)  # 5 days = 120hrs
-            # print(dates)
-            #    
-            for min_date, max_date in dates:
-                min_date_str = min_date.strftime("%Y-%m-%d")
-                max_date_str = max_date.strftime("%Y-%m-%d")
-                # Apollo's credit page is a hash-router SPA: calling driver.get() on a
-                # history URL that differs only AFTER the '#' does NOT refetch — the date
-                # filter stays stale and every month reports the same number. Force a full
-                # reload via about:blank so the page re-reads minDate/maxDate from the URL.
-                driver.get("about:blank")
-                time.sleep(1)
-                driver.get(f"https://app.apollo.io/#/settings/credits/history?minDate={min_date_str}&maxDate={max_date_str}")
-                time.sleep(3)
-
-                # A challenge here stops the usage chart from rendering, so the widget
-                # wait below times out and the month is recorded as None.
-                clear_cloudflare_challenge(driver)
-
-                if detect_force_logout(driver):
-                    if driver:
-                        driver.quit()
-                    # raise Exception("Apollo forced logout detected while fetching history")
-
-                # The "N credits used" total lives in a stable element:
-                #   <div data-testid="credit-usage-history-chart-credits-used"
-                #        aria-label="3,848 credits used">
-                credits_used = None
-                credits_used_re = r'([\d,]+)\s+credits?\s+used'
-                try:
-                    el = WebDriverWait(driver, 25).until(
-                        EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, '[data-testid="credit-usage-history-chart-credits-used"]')
-                        )
-                    )
-                    time.sleep(2 + random.uniform(0, 1))  # let the value settle after the filter applies
-                    label = el.get_attribute("aria-label") or el.text or ""
-                    m = re.search(credits_used_re, label, re.IGNORECASE)
-                    if m:
-                        credits_used = int(m.group(1).replace(',', ''))
-                except Exception as hist_err:
-                    print(f"[CREDITS HISTORY] widget not found for {min_date_str}..{max_date_str}: {hist_err}")
-
-                # Fallback: scan the whole page text for the same "N credits used" phrase.
-                if credits_used is None:
-                    try:
-                        body_text = driver.find_element(By.TAG_NAME, "body").text
-                        m = re.search(credits_used_re, body_text, re.IGNORECASE)
-                        if m:
-                            credits_used = int(m.group(1).replace(',', ''))
-                    except Exception:
-                        pass
-
-                if credits_used is not None:
-                    print(f"[CREDITS HISTORY] {min_date_str}..{max_date_str} -> {credits_used} credits used")
-                    email_credits.append(credits_used)
-                    provided_monthly_credits.append(total_credits_provided if total_credits_provided else 10000)
-                    if total_credits_provided == 0:
-                        total_credits_provided = 10000
-                else:
-                    print(f"[CREDITS HISTORY] No 'credits used' value found for {min_date_str}..{max_date_str}")
-                    email_credits.append(None)
-                    provided_monthly_credits.append(None)
+                print(f'[SAVED SEARCHES] Data being saved:')
+                print(f'[SAVED SEARCHES]   saved_titles: "{apollo_search_field["saved_titles"]}"')
+                print(f'[SAVED SEARCHES]   saved_counts: "{apollo_search_field["saved_counts"]}"')
+                print(f'[SAVED SEARCHES]   total_saved: {apollo_search_field["total_saved"]}')
+                print(f'[SAVED SEARCHES]   netnew_counts: "{apollo_search_field["netnew_counts"]}"')
+                print(f'[SAVED SEARCHES]   total_netnew: {apollo_search_field["total_netnew"]}')
+                # driver.quit()
                 time.sleep(2)
 
-            # Did ANY month actually yield a number? Checked before padding, since
-            # padding masks the difference between "no value" and "-1".
-            got_any_month = any(c is not None for c in email_credits)
+            except Exception as e:
+                print(f'[SEARCH DATA] ========== TOP LEVEL EXCEPTION ==========')
+                print(f'[SEARCH DATA] Error: {e}')
+                print(f'[SEARCH DATA] Exception type: {type(e).__name__}')
+                import traceback
+                print(f'[SEARCH DATA] Full traceback:\n{traceback.format_exc()}')
+                print(f'[SEARCH DATA] Driver will remain open - error handled gracefully')
+                apollo_search_field['status'] = 'failed'
+                apollo_search_field['failed_reason'] = str(e)
+            # data_field['failed_reason'] = str(e)
+            csv_path = APOLLO_SEARCH_DATA_CSV
+            new_entry = pd.DataFrame([apollo_search_field])  # `data_field` is a dict with the new row
 
-            while len(email_credits) < 6:
-                email_credits.append(-1)
-            email_credits = email_credits[::-1]
-            while len(provided_monthly_credits) < 6:
-                provided_monthly_credits.append(-1)
-            provided_monthly_credits = provided_monthly_credits[::-1]
-            if total_credits_provided == 0:
-                total_credits_provided = provided_monthly_credits[0]
-            apollo_credits_field['first_month_credits'] = email_credits[0]
-            apollo_credits_field['second_month_credits'] = email_credits[1]
-            apollo_credits_field['third_month_credits'] = email_credits[2]
-            apollo_credits_field['fourth_month_credits'] = email_credits[3]
-            apollo_credits_field['fifth_month_credits'] = email_credits[4]
-            apollo_credits_field['sixth_month_credits'] = email_credits[5]
-            apollo_credits_field['first_month_provided'] = total_credits_provided
-            apollo_credits_field['second_month_provided'] = provided_monthly_credits[1]
-            apollo_credits_field['third_month_provided'] = provided_monthly_credits[2]
-            apollo_credits_field['fourth_month_provided'] = provided_monthly_credits[3]
-            apollo_credits_field['fifth_month_provided'] = provided_monthly_credits[4]
-            apollo_credits_field['sixth_month_provided'] = provided_monthly_credits[5]
-            formatted_date = renewal_date.strftime('%d %B %Y, %H:%M:%S')
-            apollo_credits_field['renewal_date'] = renewal_date.strftime('%Y-%m-%d %H:%M:%S')
-            apollo_credits_field['last_execution'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            # Step 1: Load existing CSV (if it exists)
+            if os.path.exists(csv_path):
+                try:
+                    df = pd.read_csv(csv_path)
+                    df = df[df['email'] != apollo_search_field['email']]
+                except:
+                    df = pd.DataFrame()
 
-            # Every month came back empty => the chart never rendered (Cloudflare, a
-            # layout we don't handle yet, or a slow load). Record that as 'failed' so
-            # the next run retries. Marking it 'completed' wrote an empty row that the
-            # skip check then treated as good data, freezing it in place.
-            if not got_any_month:
-                apollo_credits_field['status'] = 'failed'
-                print(f'[CREDITS DATA] No month values extracted for {email} - marking failed')
-                logging.info(f'{email}: credits marked failed - no month values extracted')
+                # Step 2: Remove rows with same email as new entry
+                
+
+                # Step 3: Append new entry
+                df = pd.concat([new_entry, df], ignore_index=True)
             else:
-                apollo_credits_field['status'] = 'completed'
-        except Exception as e:
-            apollo_credits_field['status'] = 'failed'
-            print(f"Error processing {email}: {e}")
-            logging.info(f'{email}: credits extraction failed - {e}')
-        csv_path_credits = APOLLO_CREDITS_DATA_CSV
-        new_entry_credits = pd.DataFrame([apollo_credits_field])  # `data_field` is a dict with the new row
+                # First time creating the file
+                df = new_entry
+            safe_save_csv(df, csv_path)
+            if _db:
+                _db.save_row_safe('apollo_search_data', apollo_search_field)
 
-        # Step 1: Load existing CSV (if it exists)
-        if os.path.exists(csv_path_credits):
-            try:
-                df_credits = pd.read_csv(csv_path_credits)
-                df_credits = df_credits[df_credits['email'] != apollo_credits_field['email']]
-            except:
-                df_credits = pd.DataFrame()
-            # df_credits = pd.read_csv(csv_path_credits, names=columns_apollo_credits, header=None)
-
-            # Step 2: Remove rows with same email as new entry
-            # df_credits = df_credits[df_credits['email'] != apollo_credits_field['email']]
-
-            # Step 3: Append new entry
-            df_credits = pd.concat([new_entry_credits, df_credits], ignore_index=True)
-        else:
-            # First time creating the file
-            df_credits = new_entry_credits
-        safe_save_csv(df_credits, csv_path_credits)
-        if _db:
-            _db.save_row_safe('apollo_credits_data', apollo_credits_field)
-        time.sleep(random.uniform(20, 30))
-        
-    if not condition3:
-        # ========== UPLOAD DATA EXTRACTION ==========
-        print(f"\n[UPLOAD DATA] Starting upload data extraction for {email}")
-        print(f'[UPLOAD DATA] Driver status: {"Valid" if driver else "None/Invalid"}')
-        try:
-            # Wrap entire upload section in try-catch to prevent driver from closing
-            try:
-                link = 'https://app.apollo.io/#/lists?groupBy[]=labelModality&perPage=25&sortByField=updated_at&sortAscending=false'
-                print(f"[UPLOAD DATA] Navigating to lists page: {link}")
-                if driver is None:
-                    raise Exception("Driver is None - cannot proceed with upload extraction")
-                driver.get(link)
-                time.sleep(7)
-            except Exception as upload_page_error:
-                print(f'[UPLOAD DATA] ERROR loading upload page: {upload_page_error}')
-                print(f'[UPLOAD DATA] Driver will remain open, continuing...')
-                raise  # Re-raise to be caught by outer try-catch
+        email_credits = []
+        provided_monthly_credits = []
+        if not condition2:
+            print(f'[CREDITS DATA] Starting credits data extraction for {email}')
+            print(f'[CREDITS DATA] Driver status: {"Valid" if driver else "None/Invalid"}')
             
-
-            # The lists page is grouped by modality: a header row ("List name" / no
-            # aria-rowindex), then data rows. Columns: col1=name, col2=count,
-            # col3=type (People/Companies), col5=Last Modified ("N days ago").
-            # We work directly with the Selenium row elements (no soup + magic offset)
-            # so each row's own col5 tooltip can be hovered for the precise date.
-            print(f"[UPLOAD DATA] Waiting for rows to render...")
-            time.sleep(5)
-            row_elements = driver.find_elements(By.CSS_SELECTOR, "div[role='row']")
-            print(f"[UPLOAD DATA] Found {len(row_elements)} row elements")
-
-            data = []
-            MAX_PEOPLE_ROWS = 15  # take the first 15 People entries
-
-            def _cell_text(row_el, colindex):
+            try:
+                # Wrap entire credits section in try-catch to prevent driver from closing
                 try:
-                    return row_el.find_element(
-                        By.CSS_SELECTOR, f"[aria-colindex='{colindex}']").text.strip()
-                except Exception:
-                    return ""
+                    # soup = BeautifulSoup(driver.page_source, "html.parser")
+                    time.sleep(20)
+                    print('[CREDITS DATA] going to credits\n\n')
+                    if driver is None:
+                        raise Exception("Driver is None - cannot proceed with credits extraction")
+                    driver.get("https://app.apollo.io/#/settings/credits/current")
+                    time.sleep(7 + random.uniform(-1, 2))  # wait for page load
 
-            for row_el in row_elements:
-                if len(data) >= MAX_PEOPLE_ROWS:
-                    break
-                try:
-                    # Header rows have no data aria-rowindex; skip them.
-                    if row_el.get_attribute("aria-rowindex") is None:
-                        continue
+                    # Drop any Cloudflare challenge BEFORE reading the page: the overlay
+                    # leaves the text behind it readable, so without this the renewal/credits
+                    # parse can appear to work while the chart never renders.
+                    clear_cloudflare_challenge(driver)
 
-                    name = _cell_text(row_el, 1)
-                    count = _cell_text(row_el, 2)
-                    row_type = _cell_text(row_el, 3)
+                    page_text_temp = driver.find_element(By.TAG_NAME, 'body').text
+                except Exception as credits_page_error:
+                    print(f'[CREDITS DATA] ERROR loading credits page: {credits_page_error}')
+                    print(f'[CREDITS DATA] Driver will remain open, continuing...')
+                    raise  # Re-raise to be caught by outer try-catch
+                # Works across all known layouts (credits/mo, emails/mo, new donut UI).
+                used_credits, total_credits_provided = extract_credit_usage(page_text_temp)
 
-                    # Skip headers / empty rows; only keep People-type lists.
-                    if not name or name.lower().strip() == 'list name':
-                        continue
-                    if row_type.lower().strip() != 'people':
-                        continue
+                # Parse the page source
+                page_source = driver.page_source
+                soup = BeautifulSoup(page_source, "html.parser")
+                page_text = soup.get_text()
+                time.sleep(1 + random.uniform(-1, 2))
 
-                    visible_date = _cell_text(row_el, 5)
+                renewal_date = extract_renewal_date(
+                    body_text=page_text_temp,
+                    soup_text=page_text,
+                    current_url=driver.current_url,
+                )
 
-                    # Precise date via tooltip hover on THIS row's col5 trigger.
-                    full_date = ""
+                if not renewal_date:
+                    # Genuinely unreadable: an unchallenged page whose renewal text is
+                    # missing in every known form AND whose URL carries no minDate.
+                    # Raise rather than `continue` - a bare continue skipped both the CSV
+                    # save below (losing the 'failed' status) and safe_quit(driver) at the
+                    # end of the loop, which leaked Chrome and locked the next profile.
+                    print('[CREDITS DATA] Renewal date not found in any known layout')
+                    logging.info(f'{email}: renewal date not found in any known layout')
+                    raise Exception('renewal date not found (unrecognised credits layout)')
+
+                dates = get_past_renewal_credit_periods(renewal_date)
+                days_to_renew = (renewal_date - datetime.now()) <= timedelta(days=7)  # 5 days = 120hrs
+                # print(dates)
+                #    
+                for min_date, max_date in dates:
+                    min_date_str = min_date.strftime("%Y-%m-%d")
+                    max_date_str = max_date.strftime("%Y-%m-%d")
+                    # Apollo's credit page is a hash-router SPA: calling driver.get() on a
+                    # history URL that differs only AFTER the '#' does NOT refetch — the date
+                    # filter stays stale and every month reports the same number. Force a full
+                    # reload via about:blank so the page re-reads minDate/maxDate from the URL.
+                    driver.get("about:blank")
+                    time.sleep(1)
+                    driver.get(f"https://app.apollo.io/#/settings/credits/history?minDate={min_date_str}&maxDate={max_date_str}")
+                    time.sleep(3)
+
+                    # A challenge here stops the usage chart from rendering, so the widget
+                    # wait below times out and the month is recorded as None.
+                    clear_cloudflare_challenge(driver)
+
+                    if detect_force_logout(driver):
+                        if driver:
+                            driver.quit()
+                        # raise Exception("Apollo forced logout detected while fetching history")
+
+                    # The "N credits used" total lives in a stable element:
+                    #   <div data-testid="credit-usage-history-chart-credits-used"
+                    #        aria-label="3,848 credits used">
+                    credits_used = None
+                    credits_used_re = r'([\d,]+)\s+credits?\s+used'
                     try:
-                        trigger = row_el.find_element(
-                            By.CSS_SELECTOR, "[aria-colindex='5'] span[data-has-tooltip='true']")
-                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", trigger)
-                        time.sleep(0.3)
-                        ActionChains(driver).move_to_element(trigger).pause(0.3).perform()
-                        tooltip = WebDriverWait(driver, 6).until(
-                            EC.visibility_of_element_located((By.CSS_SELECTOR, '[role="tooltip"]')))
-                        full_date = tooltip.text.strip()
-                    except Exception as tip_err:
-                        print(f"[UPLOAD DATA] '{name}' - tooltip date failed, using visible date: {tip_err}")
+                        el = WebDriverWait(driver, 25).until(
+                            EC.presence_of_element_located(
+                                (By.CSS_SELECTOR, '[data-testid="credit-usage-history-chart-credits-used"]')
+                            )
+                        )
+                        time.sleep(2 + random.uniform(0, 1))  # let the value settle after the filter applies
+                        label = el.get_attribute("aria-label") or el.text or ""
+                        m = re.search(credits_used_re, label, re.IGNORECASE)
+                        if m:
+                            credits_used = int(m.group(1).replace(',', ''))
+                    except Exception as hist_err:
+                        print(f"[CREDITS HISTORY] widget not found for {min_date_str}..{max_date_str}: {hist_err}")
 
-                    temp_filed = {
-                        "name": name,
-                        "count": count,
-                        "date_visible": visible_date,
-                        "date_full": full_date,
-                    }
-                    data.append(temp_filed)
-                    print(f"[UPLOAD DATA] +{len(data)}/{MAX_PEOPLE_ROWS}: {temp_filed}")
-                    time.sleep(random.uniform(0.5, 1.0))
-
-                except Exception as e:
-                    print(f"[UPLOAD DATA] Row parse error: {e}")
-
-            print(f"[UPLOAD DATA] Total data extracted: {len(data)} items")
-            apollo_upload_filed["data"] = data
-            apollo_upload_filed['last_execution'] = datetime.now()
-            
-            if len(data) > 0:
-                # Check how many have full dates
-                full_dates_count = sum(1 for d in data if d.get('date_full', '').strip())
-                visible_dates_count = sum(1 for d in data if d.get('date_visible', '').strip())
-                
-                if full_dates_count == len(data):
-                    apollo_upload_filed["status"] = 'completed'
-                    print(f"[UPLOAD DATA] Status: SUCCESS - All {len(data)} items have full dates")
-                elif full_dates_count > 0 or visible_dates_count > 0:
-                    apollo_upload_filed["status"] = 'partial'
-                    print(f"[UPLOAD DATA] Status: PARTIAL - {len(data)} items, {full_dates_count} full dates, {visible_dates_count} visible dates")
-                else:
-                    apollo_upload_filed["status"] = 'partial'
-                    print(f"[UPLOAD DATA] Status: PARTIAL - {len(data)} items but no dates available")
-            else:
-                apollo_upload_filed["status"] = 'failed'
-                print(f"[UPLOAD DATA] Status: FAILED - No data extracted")
-                        
-        except Exception as e:
-            print(f'[UPLOAD DATA] ========== UPLOAD EXTRACTION EXCEPTION ==========')
-            print(f"[UPLOAD DATA] Error processing {email}: {e}")
-            print(f'[UPLOAD DATA] Exception type: {type(e).__name__}')
-            import traceback
-            print(f'[UPLOAD DATA] Full traceback:\n{traceback.format_exc()}')
-            print(f'[UPLOAD DATA] Driver will remain open - error handled gracefully')
-            apollo_upload_filed["data"] = data if 'data' in locals() else []
-            apollo_upload_filed['last_execution'] = datetime.now()
-            apollo_upload_filed["status"] = 'failed'
-        
-        # ========== DATA PROCESSING ==========
-        print(f"\n[DATA PROCESSING] Starting data processing for {email}")
-        if len(apollo_upload_filed['data']) > 0 and apollo_upload_filed['status'] in ['completed', 'partial']:
-            print(f"[DATA PROCESSING] Processing {len(apollo_upload_filed['data'])} records")
-            records = apollo_upload_filed['data'].copy()
-            today = datetime.now()
-            
-            # Include ALL data now (including monthly and email data)
-            # Use full_date if available, otherwise fall back to visible_date
-            processed_records = []
-            for r in records:
-                try:
-                    # Skip invalid records
-                    # Only check for actual header values, not "People" which is valid data
-                    if (r.get('name', '') in ["List name", "# of Records", "Type"] or 
-                        r.get('count', '') in ["# of Records", "Type"] or
-                        r.get('date_visible', '') in ["Type"]):
-                        print(f"[DATA PROCESSING] Skipping invalid record: {r.get('name', 'Unknown')}")
-                        continue
-                    
-                    if r.get('date_full') and r['date_full'].strip():
-                        date_to_use = convert_date(r['date_full'])
-                    elif r.get('date_visible') and r['date_visible'].strip():
-                        # Try to parse visible date as fallback
+                    # Fallback: scan the whole page text for the same "N credits used" phrase.
+                    if credits_used is None:
                         try:
-                            # For visible dates like "7 days ago", "1 month ago", etc.
-                            # We need to calculate the actual date
-                            visible_date = r['date_visible'].strip()
-                            if 'days ago' in visible_date:
-                                days = int(visible_date.split()[0])
-                                date_to_use = datetime.now() - timedelta(days=days)
-                            elif 'months ago' in visible_date:
-                                months = int(visible_date.split()[0])
-                                date_to_use = datetime.now() - timedelta(days=months*30)  # Approximate
-                            elif 'month ago' in visible_date:
-                                date_to_use = datetime.now() - timedelta(days=30)  # Approximate
-                            else:
-                                # Try to parse as regular date
-                                date_to_use = convert_date(visible_date)
-                        except:
-                            # If visible date parsing fails, use current date
-                            date_to_use = datetime.now()
-                            print(f"[DATA PROCESSING] Using current date for {r.get('name', 'Unknown')} (date parsing failed)")
-                    else:
-                        date_to_use = datetime.now()
-                        print(f"[DATA PROCESSING] Using current date for {r.get('name', 'Unknown')} (no date available)")
-                    
-                    processed_records.append({
-                        'name': r.get('name', f'Unknown_{len(processed_records)}'),
-                        'count': convert_count(r.get('count', '0')),
-                        'date': date_to_use
-                    })
-                except Exception as e:
-                    print(f"[DATA PROCESSING] Error processing record {r.get('name', 'Unknown')}: {e}")
-                    # Still add the record with current date
-                    processed_records.append({
-                        'name': r.get('name', f'Unknown_{len(processed_records)}'),
-                        'count': convert_count(r.get('count', '0')),
-                        'date': datetime.now()
-                    })
-            
-            filtered_records = []
-            for record in processed_records:
-                if 'monthly' in record['name'].lower():
-                    print('This is not includable')
-                else:
-                    filtered_records.append(record)
+                            body_text = driver.find_element(By.TAG_NAME, "body").text
+                            m = re.search(credits_used_re, body_text, re.IGNORECASE)
+                            if m:
+                                credits_used = int(m.group(1).replace(',', ''))
+                        except Exception:
+                            pass
 
-            upload_df = pd.DataFrame(filtered_records)
-            print(f"[DATA PROCESSING] Created DataFrame with {len(upload_df)} rows")
-            upload_df = upload_df.sort_values(by='date', ascending=False).reset_index(drop=True)
-            
-            # Group by month instead of by date proximity
-            upload_df['year_month'] = upload_df['date'].dt.to_period('M')
-            print(f"[DATA PROCESSING] Added year_month column")
-            
-            # Get the last N months (current + previous months)
-            current_month = pd.Timestamp(today).to_period('M')
-            target_months = [current_month - i for i in range(MONTHS_TO_INCLUDE)]
-            print(f"[DATA PROCESSING] Target months: {target_months}")
-            
-            # Filter data for last N months only
-            recent_data = upload_df[upload_df['year_month'].isin(target_months)]
-            print(f"[DATA PROCESSING] Recent data (last {MONTHS_TO_INCLUDE} months): {len(recent_data)} rows")
-            
-            # Get current month data only for data_count
-            current_month_data = upload_df[upload_df['year_month'] == current_month]
-            current_month_count = current_month_data['count'].sum() if len(current_month_data) > 0 else 0
-            print(f"[DATA PROCESSING] Current month ({current_month}) count: {current_month_count:,}")
-            
-            # Group by month and process individual records (keep all files separately)
-            def process_month_group(group):
-                """Process a month's records: sort by date ascending, number them, and build flat structure"""
-                # Sort by date ascending (oldest first)
-                sorted_group = group.sort_values(by='date', ascending=True).reset_index(drop=True)
-                
-                # Build result dictionary
-                result = {}
-                total_count = 0
-                latest_date = None
-                
-                # Number each record sequentially (1 = oldest, 2, 3, etc. = newer)
-                for idx, row in sorted_group.iterrows():
-                    file_num = idx + 1  # Start numbering from 1
-                    result[f'count_{file_num}'] = int(row['count'])
-                    result[f'date_{file_num}'] = row['date'].strftime('%Y-%m-%d %H:%M:%S')
-                    total_count += int(row['count'])
-                    # Track latest date (last one in sorted ascending order is the newest)
-                    latest_date = row['date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                result['total_count'] = total_count
-                result['latest_date'] = latest_date if latest_date else None
-                
-                return result
-            
-            # Process each month group
-            monthly_data_dict = {}
-            for month_period, group in recent_data.groupby('year_month'):
-                monthly_data_dict[month_period] = process_month_group(group)
-            
-            # Ensure all target months are included, even with 0 counts
-            monthly_breakdown = []
-            for month_period in target_months:
-                # Check if this month has data
-                month_data = monthly_data_dict.get(month_period)
-                
-                month_str = month_period.strftime('%Y-%m')  # e.g., '2025-10'
-                month_name = month_period.strftime('%b %Y')  # e.g., 'Oct 2025'
-                
-                if month_data:
-                    # Month has data - include all individual file data
-                    month_entry = {
-                        'year_month': month_str,
-                        'month_name': month_name,
-                        'total_count': month_data['total_count'],
-                        'latest_date': month_data['latest_date']
-                    }
-                    # Add all individual count and date fields
-                    for key, value in month_data.items():
-                        if key not in ['total_count', 'latest_date']:
-                            month_entry[key] = value
-                    monthly_breakdown.append(month_entry)
-                else:
-                    # Month has no data - set to 0
-                    monthly_breakdown.append({
-                        'year_month': month_str,
-                        'month_name': month_name,
-                        'total_count': 0,
-                        'latest_date': None
-                    })
-            
-            print(f"[DATA PROCESSING] Monthly breakdown (all {MONTHS_TO_INCLUDE} months): {monthly_breakdown}")
-            
-            # ========== LAST UPLOADED DATA COUNT CALCULATION ==========
-            # Apply the same logic as sk_test.py to get recent uploaded data count
-            print(f"[DATA PROCESSING] Calculating last_uploaded_data count using grouping logic...")
-            
-            # Filter out monthly and email data for last_uploaded_data calculation
-            
-            if filtered_records:
-                filtered_df = pd.DataFrame(filtered_records)
-                filtered_df = filtered_df.sort_values(by='date', ascending=False).reset_index(drop=True)
-                print(f"[DATA PROCESSING] Filtered records for last_uploaded_data: {len(filtered_df)} rows")
-                
-                # Apply grouping logic from sk_test.py
-                groups = []
-                current_group = []
-                
-                for i, row in filtered_df.iterrows():
-                    if row['count'] < 1000:
-                        continue
-                    
-                    if not current_group:
-                        current_group.append(row)
+                    if credits_used is not None:
+                        print(f"[CREDITS HISTORY] {min_date_str}..{max_date_str} -> {credits_used} credits used")
+                        email_credits.append(credits_used)
+                        provided_monthly_credits.append(total_credits_provided if total_credits_provided else 10000)
+                        if total_credits_provided == 0:
+                            total_credits_provided = 10000
                     else:
-                        last_date = current_group[-1]['date']
-                        if abs((row['date'] - last_date).days) <= 1:
+                        print(f"[CREDITS HISTORY] No 'credits used' value found for {min_date_str}..{max_date_str}")
+                        email_credits.append(None)
+                        provided_monthly_credits.append(None)
+                    time.sleep(2)
+
+                # Did ANY month actually yield a number? Checked before padding, since
+                # padding masks the difference between "no value" and "-1".
+                got_any_month = any(c is not None for c in email_credits)
+
+                while len(email_credits) < 6:
+                    email_credits.append(-1)
+                email_credits = email_credits[::-1]
+                while len(provided_monthly_credits) < 6:
+                    provided_monthly_credits.append(-1)
+                provided_monthly_credits = provided_monthly_credits[::-1]
+                if total_credits_provided == 0:
+                    total_credits_provided = provided_monthly_credits[0]
+                apollo_credits_field['first_month_credits'] = email_credits[0]
+                apollo_credits_field['second_month_credits'] = email_credits[1]
+                apollo_credits_field['third_month_credits'] = email_credits[2]
+                apollo_credits_field['fourth_month_credits'] = email_credits[3]
+                apollo_credits_field['fifth_month_credits'] = email_credits[4]
+                apollo_credits_field['sixth_month_credits'] = email_credits[5]
+                apollo_credits_field['first_month_provided'] = total_credits_provided
+                apollo_credits_field['second_month_provided'] = provided_monthly_credits[1]
+                apollo_credits_field['third_month_provided'] = provided_monthly_credits[2]
+                apollo_credits_field['fourth_month_provided'] = provided_monthly_credits[3]
+                apollo_credits_field['fifth_month_provided'] = provided_monthly_credits[4]
+                apollo_credits_field['sixth_month_provided'] = provided_monthly_credits[5]
+                formatted_date = renewal_date.strftime('%d %B %Y, %H:%M:%S')
+                apollo_credits_field['renewal_date'] = renewal_date.strftime('%Y-%m-%d %H:%M:%S')
+                apollo_credits_field['last_execution'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                # Every month came back empty => the chart never rendered (Cloudflare, a
+                # layout we don't handle yet, or a slow load). Record that as 'failed' so
+                # the next run retries. Marking it 'completed' wrote an empty row that the
+                # skip check then treated as good data, freezing it in place.
+                if not got_any_month:
+                    apollo_credits_field['status'] = 'failed'
+                    print(f'[CREDITS DATA] No month values extracted for {email} - marking failed')
+                    logging.info(f'{email}: credits marked failed - no month values extracted')
+                else:
+                    apollo_credits_field['status'] = 'completed'
+            except Exception as e:
+                apollo_credits_field['status'] = 'failed'
+                print(f"Error processing {email}: {e}")
+                logging.info(f'{email}: credits extraction failed - {e}')
+            csv_path_credits = APOLLO_CREDITS_DATA_CSV
+            new_entry_credits = pd.DataFrame([apollo_credits_field])  # `data_field` is a dict with the new row
+
+            # Step 1: Load existing CSV (if it exists)
+            if os.path.exists(csv_path_credits):
+                try:
+                    df_credits = pd.read_csv(csv_path_credits)
+                    df_credits = df_credits[df_credits['email'] != apollo_credits_field['email']]
+                except:
+                    df_credits = pd.DataFrame()
+                # df_credits = pd.read_csv(csv_path_credits, names=columns_apollo_credits, header=None)
+
+                # Step 2: Remove rows with same email as new entry
+                # df_credits = df_credits[df_credits['email'] != apollo_credits_field['email']]
+
+                # Step 3: Append new entry
+                df_credits = pd.concat([new_entry_credits, df_credits], ignore_index=True)
+            else:
+                # First time creating the file
+                df_credits = new_entry_credits
+            safe_save_csv(df_credits, csv_path_credits)
+            if _db:
+                _db.save_row_safe('apollo_credits_data', apollo_credits_field)
+            time.sleep(random.uniform(20, 30))
+            
+        if not condition3:
+            # ========== UPLOAD DATA EXTRACTION ==========
+            print(f"\n[UPLOAD DATA] Starting upload data extraction for {email}")
+            print(f'[UPLOAD DATA] Driver status: {"Valid" if driver else "None/Invalid"}')
+            try:
+                # Wrap entire upload section in try-catch to prevent driver from closing
+                try:
+                    link = 'https://app.apollo.io/#/lists?groupBy[]=labelModality&perPage=25&sortByField=updated_at&sortAscending=false'
+                    print(f"[UPLOAD DATA] Navigating to lists page: {link}")
+                    if driver is None:
+                        raise Exception("Driver is None - cannot proceed with upload extraction")
+                    driver.get(link)
+                    time.sleep(7)
+                except Exception as upload_page_error:
+                    print(f'[UPLOAD DATA] ERROR loading upload page: {upload_page_error}')
+                    print(f'[UPLOAD DATA] Driver will remain open, continuing...')
+                    raise  # Re-raise to be caught by outer try-catch
+                
+
+                # The lists page is grouped by modality: a header row ("List name" / no
+                # aria-rowindex), then data rows. Columns: col1=name, col2=count,
+                # col3=type (People/Companies), col5=Last Modified ("N days ago").
+                # We work directly with the Selenium row elements (no soup + magic offset)
+                # so each row's own col5 tooltip can be hovered for the precise date.
+                print(f"[UPLOAD DATA] Waiting for rows to render...")
+                time.sleep(5)
+                row_elements = driver.find_elements(By.CSS_SELECTOR, "div[role='row']")
+                print(f"[UPLOAD DATA] Found {len(row_elements)} row elements")
+
+                data = []
+                MAX_PEOPLE_ROWS = 15  # take the first 15 People entries
+
+                def _cell_text(row_el, colindex):
+                    try:
+                        return row_el.find_element(
+                            By.CSS_SELECTOR, f"[aria-colindex='{colindex}']").text.strip()
+                    except Exception:
+                        return ""
+
+                for row_el in row_elements:
+                    if len(data) >= MAX_PEOPLE_ROWS:
+                        break
+                    try:
+                        # Header rows have no data aria-rowindex; skip them.
+                        if row_el.get_attribute("aria-rowindex") is None:
+                            continue
+
+                        name = _cell_text(row_el, 1)
+                        count = _cell_text(row_el, 2)
+                        row_type = _cell_text(row_el, 3)
+
+                        # Skip headers / empty rows; only keep People-type lists.
+                        if not name or name.lower().strip() == 'list name':
+                            continue
+                        if row_type.lower().strip() != 'people':
+                            continue
+
+                        visible_date = _cell_text(row_el, 5)
+
+                        # Precise date via tooltip hover on THIS row's col5 trigger.
+                        full_date = ""
+                        try:
+                            trigger = row_el.find_element(
+                                By.CSS_SELECTOR, "[aria-colindex='5'] span[data-has-tooltip='true']")
+                            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", trigger)
+                            time.sleep(0.3)
+                            ActionChains(driver).move_to_element(trigger).pause(0.3).perform()
+                            tooltip = WebDriverWait(driver, 6).until(
+                                EC.visibility_of_element_located((By.CSS_SELECTOR, '[role="tooltip"]')))
+                            full_date = tooltip.text.strip()
+                        except Exception as tip_err:
+                            print(f"[UPLOAD DATA] '{name}' - tooltip date failed, using visible date: {tip_err}")
+
+                        temp_filed = {
+                            "name": name,
+                            "count": count,
+                            "date_visible": visible_date,
+                            "date_full": full_date,
+                        }
+                        data.append(temp_filed)
+                        print(f"[UPLOAD DATA] +{len(data)}/{MAX_PEOPLE_ROWS}: {temp_filed}")
+                        time.sleep(random.uniform(0.5, 1.0))
+
+                    except Exception as e:
+                        print(f"[UPLOAD DATA] Row parse error: {e}")
+
+                print(f"[UPLOAD DATA] Total data extracted: {len(data)} items")
+                apollo_upload_filed["data"] = data
+                apollo_upload_filed['last_execution'] = datetime.now()
+                
+                if len(data) > 0:
+                    # Check how many have full dates
+                    full_dates_count = sum(1 for d in data if d.get('date_full', '').strip())
+                    visible_dates_count = sum(1 for d in data if d.get('date_visible', '').strip())
+                    
+                    if full_dates_count == len(data):
+                        apollo_upload_filed["status"] = 'completed'
+                        print(f"[UPLOAD DATA] Status: SUCCESS - All {len(data)} items have full dates")
+                    elif full_dates_count > 0 or visible_dates_count > 0:
+                        apollo_upload_filed["status"] = 'partial'
+                        print(f"[UPLOAD DATA] Status: PARTIAL - {len(data)} items, {full_dates_count} full dates, {visible_dates_count} visible dates")
+                    else:
+                        apollo_upload_filed["status"] = 'partial'
+                        print(f"[UPLOAD DATA] Status: PARTIAL - {len(data)} items but no dates available")
+                else:
+                    apollo_upload_filed["status"] = 'failed'
+                    print(f"[UPLOAD DATA] Status: FAILED - No data extracted")
+                            
+            except Exception as e:
+                print(f'[UPLOAD DATA] ========== UPLOAD EXTRACTION EXCEPTION ==========')
+                print(f"[UPLOAD DATA] Error processing {email}: {e}")
+                print(f'[UPLOAD DATA] Exception type: {type(e).__name__}')
+                import traceback
+                print(f'[UPLOAD DATA] Full traceback:\n{traceback.format_exc()}')
+                print(f'[UPLOAD DATA] Driver will remain open - error handled gracefully')
+                apollo_upload_filed["data"] = data if 'data' in locals() else []
+                apollo_upload_filed['last_execution'] = datetime.now()
+                apollo_upload_filed["status"] = 'failed'
+            
+            # ========== DATA PROCESSING ==========
+            print(f"\n[DATA PROCESSING] Starting data processing for {email}")
+            if len(apollo_upload_filed['data']) > 0 and apollo_upload_filed['status'] in ['completed', 'partial']:
+                print(f"[DATA PROCESSING] Processing {len(apollo_upload_filed['data'])} records")
+                records = apollo_upload_filed['data'].copy()
+                today = datetime.now()
+                
+                # Include ALL data now (including monthly and email data)
+                # Use full_date if available, otherwise fall back to visible_date
+                processed_records = []
+                for r in records:
+                    try:
+                        # Skip invalid records
+                        # Only check for actual header values, not "People" which is valid data
+                        if (r.get('name', '') in ["List name", "# of Records", "Type"] or 
+                            r.get('count', '') in ["# of Records", "Type"] or
+                            r.get('date_visible', '') in ["Type"]):
+                            print(f"[DATA PROCESSING] Skipping invalid record: {r.get('name', 'Unknown')}")
+                            continue
+                        
+                        if r.get('date_full') and r['date_full'].strip():
+                            date_to_use = convert_date(r['date_full'])
+                        elif r.get('date_visible') and r['date_visible'].strip():
+                            # Try to parse visible date as fallback
+                            try:
+                                # For visible dates like "7 days ago", "1 month ago", etc.
+                                # We need to calculate the actual date
+                                visible_date = r['date_visible'].strip()
+                                if 'days ago' in visible_date:
+                                    days = int(visible_date.split()[0])
+                                    date_to_use = datetime.now() - timedelta(days=days)
+                                elif 'months ago' in visible_date:
+                                    months = int(visible_date.split()[0])
+                                    date_to_use = datetime.now() - timedelta(days=months*30)  # Approximate
+                                elif 'month ago' in visible_date:
+                                    date_to_use = datetime.now() - timedelta(days=30)  # Approximate
+                                else:
+                                    # Try to parse as regular date
+                                    date_to_use = convert_date(visible_date)
+                            except:
+                                # If visible date parsing fails, use current date
+                                date_to_use = datetime.now()
+                                print(f"[DATA PROCESSING] Using current date for {r.get('name', 'Unknown')} (date parsing failed)")
+                        else:
+                            date_to_use = datetime.now()
+                            print(f"[DATA PROCESSING] Using current date for {r.get('name', 'Unknown')} (no date available)")
+                        
+                        processed_records.append({
+                            'name': r.get('name', f'Unknown_{len(processed_records)}'),
+                            'count': convert_count(r.get('count', '0')),
+                            'date': date_to_use
+                        })
+                    except Exception as e:
+                        print(f"[DATA PROCESSING] Error processing record {r.get('name', 'Unknown')}: {e}")
+                        # Still add the record with current date
+                        processed_records.append({
+                            'name': r.get('name', f'Unknown_{len(processed_records)}'),
+                            'count': convert_count(r.get('count', '0')),
+                            'date': datetime.now()
+                        })
+                
+                filtered_records = []
+                for record in processed_records:
+                    if 'monthly' in record['name'].lower():
+                        print('This is not includable')
+                    else:
+                        filtered_records.append(record)
+
+                upload_df = pd.DataFrame(filtered_records)
+                print(f"[DATA PROCESSING] Created DataFrame with {len(upload_df)} rows")
+                upload_df = upload_df.sort_values(by='date', ascending=False).reset_index(drop=True)
+                
+                # Group by month instead of by date proximity
+                upload_df['year_month'] = upload_df['date'].dt.to_period('M')
+                print(f"[DATA PROCESSING] Added year_month column")
+                
+                # Get the last N months (current + previous months)
+                current_month = pd.Timestamp(today).to_period('M')
+                target_months = [current_month - i for i in range(MONTHS_TO_INCLUDE)]
+                print(f"[DATA PROCESSING] Target months: {target_months}")
+                
+                # Filter data for last N months only
+                recent_data = upload_df[upload_df['year_month'].isin(target_months)]
+                print(f"[DATA PROCESSING] Recent data (last {MONTHS_TO_INCLUDE} months): {len(recent_data)} rows")
+                
+                # Get current month data only for data_count
+                current_month_data = upload_df[upload_df['year_month'] == current_month]
+                current_month_count = current_month_data['count'].sum() if len(current_month_data) > 0 else 0
+                print(f"[DATA PROCESSING] Current month ({current_month}) count: {current_month_count:,}")
+                
+                # Group by month and process individual records (keep all files separately)
+                def process_month_group(group):
+                    """Process a month's records: sort by date ascending, number them, and build flat structure"""
+                    # Sort by date ascending (oldest first)
+                    sorted_group = group.sort_values(by='date', ascending=True).reset_index(drop=True)
+                    
+                    # Build result dictionary
+                    result = {}
+                    total_count = 0
+                    latest_date = None
+                    
+                    # Number each record sequentially (1 = oldest, 2, 3, etc. = newer)
+                    for idx, row in sorted_group.iterrows():
+                        file_num = idx + 1  # Start numbering from 1
+                        result[f'count_{file_num}'] = int(row['count'])
+                        result[f'date_{file_num}'] = row['date'].strftime('%Y-%m-%d %H:%M:%S')
+                        total_count += int(row['count'])
+                        # Track latest date (last one in sorted ascending order is the newest)
+                        latest_date = row['date'].strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    result['total_count'] = total_count
+                    result['latest_date'] = latest_date if latest_date else None
+                    
+                    return result
+                
+                # Process each month group
+                monthly_data_dict = {}
+                for month_period, group in recent_data.groupby('year_month'):
+                    monthly_data_dict[month_period] = process_month_group(group)
+                
+                # Ensure all target months are included, even with 0 counts
+                monthly_breakdown = []
+                for month_period in target_months:
+                    # Check if this month has data
+                    month_data = monthly_data_dict.get(month_period)
+                    
+                    month_str = month_period.strftime('%Y-%m')  # e.g., '2025-10'
+                    month_name = month_period.strftime('%b %Y')  # e.g., 'Oct 2025'
+                    
+                    if month_data:
+                        # Month has data - include all individual file data
+                        month_entry = {
+                            'year_month': month_str,
+                            'month_name': month_name,
+                            'total_count': month_data['total_count'],
+                            'latest_date': month_data['latest_date']
+                        }
+                        # Add all individual count and date fields
+                        for key, value in month_data.items():
+                            if key not in ['total_count', 'latest_date']:
+                                month_entry[key] = value
+                        monthly_breakdown.append(month_entry)
+                    else:
+                        # Month has no data - set to 0
+                        monthly_breakdown.append({
+                            'year_month': month_str,
+                            'month_name': month_name,
+                            'total_count': 0,
+                            'latest_date': None
+                        })
+                
+                print(f"[DATA PROCESSING] Monthly breakdown (all {MONTHS_TO_INCLUDE} months): {monthly_breakdown}")
+                
+                # ========== LAST UPLOADED DATA COUNT CALCULATION ==========
+                # Apply the same logic as sk_test.py to get recent uploaded data count
+                print(f"[DATA PROCESSING] Calculating last_uploaded_data count using grouping logic...")
+                
+                # Filter out monthly and email data for last_uploaded_data calculation
+                
+                if filtered_records:
+                    filtered_df = pd.DataFrame(filtered_records)
+                    filtered_df = filtered_df.sort_values(by='date', ascending=False).reset_index(drop=True)
+                    print(f"[DATA PROCESSING] Filtered records for last_uploaded_data: {len(filtered_df)} rows")
+                    
+                    # Apply grouping logic from sk_test.py
+                    groups = []
+                    current_group = []
+                    
+                    for i, row in filtered_df.iterrows():
+                        if row['count'] < 1000:
+                            continue
+                        
+                        if not current_group:
                             current_group.append(row)
                         else:
-                            groups.append(current_group)
-                            current_group = [row]
-                
-                if current_group:
-                    groups.append(current_group)
-                
-                # Apply second rule: look for solo uploads with ≥10K
-                for i, row in filtered_df.iterrows():
-                    is_already_grouped = any(row['name'] in [r['name'] for r in g] for g in groups)
-                    if not is_already_grouped and row['count'] >= 3000:
-                        groups.append([row])
-                
-                # Calculate total count from the first group (most recent uploads)
-                if groups:
-                    usable_data_list = groups[0]
-                    last_uploaded_data_count = 0
-                    date_list = []
-                    for usable_data in usable_data_list:
-                        last_uploaded_data_count += usable_data['count']
-                        date_list.append(usable_data['date'])
+                            last_date = current_group[-1]['date']
+                            if abs((row['date'] - last_date).days) <= 1:
+                                current_group.append(row)
+                            else:
+                                groups.append(current_group)
+                                current_group = [row]
                     
-                    if date_list:
-                        last_uploaded_date = max(date_list)
+                    if current_group:
+                        groups.append(current_group)
+                    
+                    # Apply second rule: look for solo uploads with ≥10K
+                    for i, row in filtered_df.iterrows():
+                        is_already_grouped = any(row['name'] in [r['name'] for r in g] for g in groups)
+                        if not is_already_grouped and row['count'] >= 3000:
+                            groups.append([row])
+                    
+                    # Calculate total count from the first group (most recent uploads)
+                    if groups:
+                        usable_data_list = groups[0]
+                        last_uploaded_data_count = 0
+                        date_list = []
+                        for usable_data in usable_data_list:
+                            last_uploaded_data_count += usable_data['count']
+                            date_list.append(usable_data['date'])
+                        
+                        if date_list:
+                            last_uploaded_date = max(date_list)
+                        else:
+                            last_uploaded_date = apollo_upload_filed['last_execution']
+                        
+                        print(f"[DATA PROCESSING] Last uploaded data count: {last_uploaded_data_count:,}")
                     else:
+                        last_uploaded_data_count = 0
                         last_uploaded_date = apollo_upload_filed['last_execution']
-                    
-                    print(f"[DATA PROCESSING] Last uploaded data count: {last_uploaded_data_count:,}")
+                        print(f"[DATA PROCESSING] No groups found, last_uploaded_data_count: 0")
                 else:
                     last_uploaded_data_count = 0
                     last_uploaded_date = apollo_upload_filed['last_execution']
-                    print(f"[DATA PROCESSING] No groups found, last_uploaded_data_count: 0")
+                    print(f"[DATA PROCESSING] No filtered records, last_uploaded_data_count: 0")
+                
+                # Calculate totals
+                if len(recent_data) > 0:
+                    if 'last_uploaded_date' not in locals():
+                        last_uploaded_date = recent_data['date'].max()
+                else:
+                    if 'last_uploaded_date' not in locals():
+                        last_uploaded_date = apollo_upload_filed['last_execution']
+                print(f"[DATA PROCESSING] Current month count: {current_month_count:,}, Last uploaded: {last_uploaded_date}, Last uploaded data count: {last_uploaded_data_count:,}")
             else:
+                print(f"[DATA PROCESSING] Skipping processing - status: {apollo_upload_filed['status']}, data length: {len(apollo_upload_filed.get('data', []))}")
+                current_month_count = 0
                 last_uploaded_data_count = 0
                 last_uploaded_date = apollo_upload_filed['last_execution']
-                print(f"[DATA PROCESSING] No filtered records, last_uploaded_data_count: 0")
+                monthly_breakdown = []
             
-            # Calculate totals
-            if len(recent_data) > 0:
-                if 'last_uploaded_date' not in locals():
-                    last_uploaded_date = recent_data['date'].max()
+            # ========== SAVE TO CSV ==========
+            print(f"\n[CSV SAVE] Preparing to save data for {email}")
+            # Convert monthly_breakdown to string for CSV compatibility
+            monthly_breakdown_str = str(monthly_breakdown) if monthly_breakdown else ""
+            
+            final_filed = {
+                'email': apollo_upload_filed['email'],
+                'data_count': last_uploaded_data_count,
+                'last_uploaded': last_uploaded_date,
+                'status': apollo_upload_filed['status'],
+                'last_execution': apollo_upload_filed['last_execution'],
+                'monthly_breakdown': monthly_breakdown_str
+            }
+            print(f"[CSV SAVE] Final data: {final_filed}")
+            
+            temp_upload_df = pd.DataFrame([final_filed])
+            csv_path = APOLLO_UPLOAD_DATA_CSV
+            
+            if os.path.exists(csv_path):
+                try:
+                    temp_upload_df1 = pd.read_csv(csv_path)
+                    temp_upload_df1 = temp_upload_df1[temp_upload_df1['email'] != final_filed['email']]
+                    temp_upload_df = pd.concat([temp_upload_df, temp_upload_df1], ignore_index=True)
+                    print(f"[CSV SAVE] Updated existing CSV file")
+                except Exception as e:
+                    print(f"[CSV SAVE] Error reading existing CSV: {e}")
+                    temp_upload_df1 = pd.DataFrame()
+                    temp_upload_df = pd.concat([temp_upload_df, temp_upload_df1], ignore_index=True)
             else:
-                if 'last_uploaded_date' not in locals():
-                    last_uploaded_date = apollo_upload_filed['last_execution']
-            print(f"[DATA PROCESSING] Current month count: {current_month_count:,}, Last uploaded: {last_uploaded_date}, Last uploaded data count: {last_uploaded_data_count:,}")
-        else:
-            print(f"[DATA PROCESSING] Skipping processing - status: {apollo_upload_filed['status']}, data length: {len(apollo_upload_filed.get('data', []))}")
-            current_month_count = 0
-            last_uploaded_data_count = 0
-            last_uploaded_date = apollo_upload_filed['last_execution']
-            monthly_breakdown = []
-        
-        # ========== SAVE TO CSV ==========
-        print(f"\n[CSV SAVE] Preparing to save data for {email}")
-        # Convert monthly_breakdown to string for CSV compatibility
-        monthly_breakdown_str = str(monthly_breakdown) if monthly_breakdown else ""
-        
-        final_filed = {
-            'email': apollo_upload_filed['email'],
-            'data_count': last_uploaded_data_count,
-            'last_uploaded': last_uploaded_date,
-            'status': apollo_upload_filed['status'],
-            'last_execution': apollo_upload_filed['last_execution'],
-            'monthly_breakdown': monthly_breakdown_str
-        }
-        print(f"[CSV SAVE] Final data: {final_filed}")
-        
-        temp_upload_df = pd.DataFrame([final_filed])
-        csv_path = APOLLO_UPLOAD_DATA_CSV
-        
-        if os.path.exists(csv_path):
-            try:
-                temp_upload_df1 = pd.read_csv(csv_path)
-                temp_upload_df1 = temp_upload_df1[temp_upload_df1['email'] != final_filed['email']]
-                temp_upload_df = pd.concat([temp_upload_df, temp_upload_df1], ignore_index=True)
-                print(f"[CSV SAVE] Updated existing CSV file")
-            except Exception as e:
-                print(f"[CSV SAVE] Error reading existing CSV: {e}")
-                temp_upload_df1 = pd.DataFrame()
-                temp_upload_df = pd.concat([temp_upload_df, temp_upload_df1], ignore_index=True)
-        else:
-            print(f"[CSV SAVE] Creating new CSV file")
-            
-        safe_save_csv(temp_upload_df, csv_path)
-        if _db:
-            _db.save_row_safe('apollo_upload_data', final_filed)
-        print(f"[CSV SAVE] Successfully saved to {csv_path}")
-        time.sleep(random.uniform(20, 30))
+                print(f"[CSV SAVE] Creating new CSV file")
+                
+            safe_save_csv(temp_upload_df, csv_path)
+            if _db:
+                _db.save_row_safe('apollo_upload_data', final_filed)
+            print(f"[CSV SAVE] Successfully saved to {csv_path}")
+            time.sleep(random.uniform(20, 30))
 
-    print(f'[LOOP END] Finished processing email: {email}')
-    
-    # Check if all sections were skipped
-    if condition1 and condition2 and condition3:
-        print(f'[LOOP END] All sections were skipped - closing driver (nothing to process)')
-        print(f'[LOOP END] Email was processed recently, so no data extraction was needed')
+        print(f'[LOOP END] Finished processing email: {email}')
+        
+        # Check if all sections were skipped
+        if condition1 and condition2 and condition3:
+            print(f'[LOOP END] All sections were skipped - closing driver (nothing to process)')
+            print(f'[LOOP END] Email was processed recently, so no data extraction was needed')
+        else:
+            print(f'[LOOP END] Processing completed - closing driver')
+        
+        print(f'[LOOP END] Closing driver and taking break...')
+        safe_quit(driver)
+        print(f'Taking break for {SLEEP_BETWEEN_ACCOUNTS} seconds.')
+        time.sleep(SLEEP_BETWEEN_ACCOUNTS)
+
+    def UploadToAWS(local_file, bucket_name, s3_file):
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id = access_key,
+            aws_secret_access_key = secret_key,
+            region_name = "ap-south-1"
+        )
+        try:
+            s3.upload_file(local_file, bucket_name, s3_file)
+            print("Upload To AWS Successful")
+            return True
+        except FileNotFoundError:
+            print("The file was not found")
+            return False
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+
+    # AWS Upload (if enabled)
+    if ENABLE_AWS_UPLOAD:
+        print("Uploading data to AWS S3...")
+        UploadToAWS(APOLLO_SEARCH_DATA_CSV, 'apollo-tables', f'apollo_searches_{timestamp}.csv')
+        UploadToAWS(APOLLO_CREDITS_DATA_CSV, 'apollo-tables', f'apollo_credits_{timestamp}.csv')
+        UploadToAWS(APOLLO_UPLOAD_DATA_CSV, 'apollo-tables', f'apollo_upload_data_{timestamp}.csv')
+        print("✅ Uploaded All Apollo Account Data to AWS")
     else:
-        print(f'[LOOP END] Processing completed - closing driver')
-    
-    print(f'[LOOP END] Closing driver and taking break...')
-    safe_quit(driver)
-    print(f'Taking break for {SLEEP_BETWEEN_ACCOUNTS} seconds.')
-    time.sleep(SLEEP_BETWEEN_ACCOUNTS)
+        print("ℹ️  AWS upload disabled. Data saved locally only.")
 
-def UploadToAWS(local_file, bucket_name, s3_file):
-    s3 = boto3.client(
-        's3',
-        aws_access_key_id = access_key,
-        aws_secret_access_key = secret_key,
-        region_name = "ap-south-1"
-    )
-    try:
-        s3.upload_file(local_file, bucket_name, s3_file)
-        print("Upload To AWS Successful")
-        return True
-    except FileNotFoundError:
-        print("The file was not found")
-        return False
-timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    print("✅ Extracted All Apollo Account Data. Please Close This Window")
 
-# AWS Upload (if enabled)
-if ENABLE_AWS_UPLOAD:
-    print("Uploading data to AWS S3...")
-    UploadToAWS(APOLLO_SEARCH_DATA_CSV, 'apollo-tables', f'apollo_searches_{timestamp}.csv')
-    UploadToAWS(APOLLO_CREDITS_DATA_CSV, 'apollo-tables', f'apollo_credits_{timestamp}.csv')
-    UploadToAWS(APOLLO_UPLOAD_DATA_CSV, 'apollo-tables', f'apollo_upload_data_{timestamp}.csv')
-    print("✅ Uploaded All Apollo Account Data to AWS")
-else:
-    print("ℹ️  AWS upload disabled. Data saved locally only.")
-
-print("✅ Extracted All Apollo Account Data. Please Close This Window")
+if __name__ == "__main__":
+    main()
