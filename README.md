@@ -83,5 +83,25 @@ These are excluded from version control by `.gitignore`:
 
 - **Phase 1 — Organization (done):** archived unused variants, added structure & docs,
   removed dead code. A few behaviour-adjacent optimizations remain, pending a supervised run.
-- **Phase 2 — Database (next):** replace the CSV/S3 hand-off with a direct MySQL integration
-  (tables mirroring the downstream dashboard schema).
+- **Phase 2 — Database (in progress):** the scraper now **dual-writes** each result to MySQL
+  (`apollo_search_data` / `apollo_credits_data` / `apollo_upload_data`) as well as the CSVs.
+  Once confirmed over a few runs, the CSV/S3 hand-off can be retired.
+
+## Database
+
+The scraper writes to a MySQL DB (credentials in `.env` as `DB_*`). Code lives in `db/`:
+
+| File | Purpose |
+|------|---------|
+| `db/schema.sql` | table definitions (mirror the three CSVs; `email` is UNIQUE for upserts) |
+| `db/__init__.py` | `get_connection()`, `upsert()`, `coerce_row()`, `save_row_safe()` |
+| `db/apply_schema.py` | create/verify the tables: `crawler\Scripts\python.exe -m db.apply_schema` |
+| `db/seed_from_csv.py` | one-off CSV loader: `crawler\Scripts\python.exe -m db.seed_from_csv` |
+
+DB writes are **best-effort**: if the DB is unreachable, the scraper logs a warning and keeps
+running (the CSVs remain the source of truth). First-time setup:
+
+```powershell
+crawler\Scripts\python.exe -m db.apply_schema     # create the tables
+crawler\Scripts\python.exe -m db.seed_from_csv    # (optional) load current CSV data
+```
