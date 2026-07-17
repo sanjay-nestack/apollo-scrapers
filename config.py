@@ -71,7 +71,6 @@ UPLOAD_DATA_FILENAME = 'apollo_upload_data_append.csv'
 # ========== VALIDATION ==========
 def validate_config():
     """Validate configuration settings"""
-    import os
     
     # Check if base folder path is valid
     if not BASE_FOLDER_PATH:

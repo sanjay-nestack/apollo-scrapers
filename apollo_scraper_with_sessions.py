@@ -27,7 +27,6 @@ import logging
 import subprocess
 for h in logging.root.handlers[:]:
     logging.root.removeHandler(h)
-# exit(1)
 # Configure logging
 logging.basicConfig(
     filename=f'app.log', 
@@ -105,25 +104,6 @@ def convert_date(dstr):
         except (ValueError, TypeError):
             continue
     return datetime.now()
-
-# def navigate_saved_searches():
-#     time.sleep(5)
-#     print("entered into function")
-#     try:
-#         wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-#         driver.get("https://app.apollo.io/#/people")
-#     except:
-#         driver.get("https://app.apollo.io/#/people")
-#     input("press enter to continue")
-#     # driver.get("https://app.apollo.io/#/people")
-#     # print("driver is re-located")
-#     # input("press enter to continue")
-#     time.sleep(5)
-
-#     wait.until(EC.visibility_of_element_located((By.LINK_TEXT, "Saved searches"))).click()
-#     time.sleep(5)
-#     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'Private')]"))).click()
-#     time.sleep(5)
 
 from selenium.common.exceptions import TimeoutException
 
@@ -2006,72 +1986,6 @@ for index, row in final_df_sorted.iterrows():
     safe_quit(driver)
     print(f'Taking break for {SLEEP_BETWEEN_ACCOUNTS} seconds.')
     time.sleep(SLEEP_BETWEEN_ACCOUNTS)
-
-# Functions moved to top of file
-
-def apollo_upload_data_insertion(all_data):
-# Parse and filter
-    final_data_list = []
-    for data in all_data:
-        if len(data['data']) > 0 and data['status'] == 'success' and all(d['date_full'] != '' for d in data['data']):
-            records = data['data'].copy()
-            today = datetime.now()
-            
-            # Include ALL data now (including monthly and email data)
-            upload_df = pd.DataFrame([
-                {
-                    'name': r['name'],
-                    'count': convert_count(r['count']),
-                    'date': convert_date(r['date_full'])
-                }
-                for r in records
-            ])
-            upload_df = upload_df.sort_values(by='date', ascending=False).reset_index(drop=True)
-            
-            # Group by month instead of by date proximity
-            upload_df['year_month'] = upload_df['date'].dt.to_period('M')
-            
-            # Get the last N months (current + previous months)
-            current_month = pd.Timestamp(today).to_period('M')
-            target_months = [current_month - i for i in range(MONTHS_TO_INCLUDE)]
-            
-            # Filter data for last 3 months only
-            recent_data = upload_df[upload_df['year_month'].isin(target_months)]
-            
-            # Group by month and sum counts
-            monthly_data = recent_data.groupby('year_month').agg({
-                'count': 'sum',
-                'date': 'max'  # Get the latest date in each month
-            }).reset_index()
-            
-            # Calculate totals
-            total_count = recent_data['count'].sum()
-            if len(recent_data) > 0:
-                last_uploaded_date = recent_data['date'].max()
-            else:
-                last_uploaded_date = data['last_execution']
-                
-            # Store monthly breakdown for detailed analysis
-            monthly_breakdown = monthly_data.to_dict('records')
-        else:
-            total_count = 0
-            last_uploaded_date = data['last_execution']
-            monthly_breakdown = []
-            
-        final_filed = {
-            'email' : data['email'],
-            'data_count' : total_count,
-            'last_uploaded' : last_uploaded_date,
-            'status' : data['status'],
-            'last_execution' : data['last_execution'],
-            'monthly_breakdown' : monthly_breakdown
-        }
-        final_data_list.append(final_filed)
-
-    data_to_insert = pd.DataFrame(final_data_list).sort_values(by='last_uploaded',ascending=False).reset_index(drop=True)
-    return data_to_insert
-# data_to_insert = apollo_upload_data_insertion(apollo_upload_details)
-# data_to_insert.to_csv(r'C:\Users\Test\Desktop\apollo_scraper\apollo_upload_data.csv', index=False)
 
 def UploadToAWS(local_file, bucket_name, s3_file):
     s3 = boto3.client(
